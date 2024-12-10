@@ -1,0 +1,87 @@
+[project]
+name = "aio-azure-clients-toolbox"
+version = "0.1.0"
+description = "Async Azure Clients Mulligan Python projects"
+authors = [
+    { "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" },
+]
+license = {file = "LICENSE"}
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiofiles",
+    "aiohttp",
+    "anyio",
+    "azure-core-tracing-opentelemetry",
+    "azure-cosmos",
+    "azure-eventgrid",
+    "azure-eventhub",
+    "azure-identity",
+    "azure-servicebus",
+    "azure-storage-blob",
+]
+[project.urls]
+Repository = "https://github.com/MulliganFunding/aio-azure-clients-toolbox"
+Documentation = "https://github.com/MulliganFunding/aio-azure-clients-toolbox"
+Releases = "https://github.com/MulliganFunding/aio-azure-clients-toolbox/releases"
+
+[tool.uv]
+dev-dependencies = [
+    "build>=1.2.1",
+    "asgi-lifespan>=2.1.0",
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6",
+    "pytest-mypy>=0.10.3",
+    "ruff>=0.6",
+    "types-aiofiles>=24.1.0.20240626",
+    "types-requests>=2.32.0.20240712",
+]
+
+[build-system]
+requires = ["setuptools", "versioningit"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+pythonpath = "."
+asyncio_mode = "auto"
+xfail_strict = "True"
+addopts = "--cov-report term:skip-covered --cov=aio_azure_clients_toolbox --strict-config --strict-markers --cov-report html"
+testpaths = [
+    "tests",
+]
+filterwarnings = [
+    "error"
+]
+
+[tool.ruff]
+src = ["aio_azure_clients_toolbox", "tests"]
+fix = true
+show-fixes = true
+output-format = "full"
+line-length = 110
+
+[tool.ruff.lint]
+select = [
+    "B",  # flake8-bugbear
+    "E",  # pycodestyle error
+    "F",  # pyflakes
+    "FA",  # flake8-future-annotations
+    "I",  # isort
+    "N",  # pep8-naming
+    "UP",  # pyupgrade
+    "W",  # pycodestyle warning
+]
+ignore = ["N818", "N805"]  # exception naming
+
+[tool.ruff.lint.isort]
+force-single-line = false
+order-by-type = false
+
+[tool.ruff.lint.per-file-ignores]
+"aio_azure_clients_toolbox/clients/__init__.py" = ["F401"]
+"aio_azure_clients_toolbox/__init__.py" = ["F401"]

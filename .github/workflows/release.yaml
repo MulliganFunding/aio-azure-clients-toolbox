@@ -1,0 +1,28 @@
+name: Release
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-publish:
+    name: Build and publish tokamak to PyPi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+    environment:
+      name: PyPi
+      url: https://pypi.org/p/aio-azure-clients-toolbox
+    steps:
+    - uses: actions/checkout@v4
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: just
+    - uses: "actions/setup-python@v4"
+      with:
+        python-version: "3.12"
+    - name: Set up uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    - name: Install pypa/build
+      run: just build
+    - name: Publish distribution 📦 to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
