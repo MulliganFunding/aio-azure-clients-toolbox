@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-and-publish:
-    name: Build and publish tokamak to PyPi
+    name: Build and publish aio-azure-clients-toolbox to PyPi
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing

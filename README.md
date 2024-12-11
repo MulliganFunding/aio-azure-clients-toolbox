@@ -36,6 +36,8 @@ This section describes the clients included here and offers suggestions on how t
 
 **This is not configurable**.
 
+**Note**: most of the examples below are primarily using the `Managed` clients (non-managed clients also exist). These will _open_ async connections and _keep_ them open in a connection-pooling. When connections are opened and closed they cannot be used. In addition, after opening, the clients must signal readiness by running their "ready" action. This typically means _sending_ a test message to confirm that the connection is live.
+
 ### Azure Blobs
 
 This library includes an Azure Blob Storage client that contains common functionality such as the following:
@@ -57,11 +59,11 @@ import os
 import tempfile
 
 from azure.identity.aio import DefaultAzureCredential
-from aio_azure_clients_toolbox import AzureBlobStorageClient as MFBlobClient
+from aio_azure_clients_toolbox import AzureBlobStorageClient
 from aio_azure_clients_toolbox.clients.azure_blobs import AzureBlobError  # reexport
 
 
-class AzureBlobStorageClient(MFBlobClient):
+class AzureBlobStorageClient(AzureBlobStorageClient):
     CONTAINER_NAME = "some-container"
     __slots__ = [
         "file_workspace_dir",
@@ -114,10 +116,10 @@ This library includes a Cosmos client that offers persistent connections up to a
 You can use it like this:
 
 ```python
-from aio_azure_clients_toolbox import Cosmos as MFCosmos
+from aio_azure_clients_toolbox import ManagedCosmos
 
 # This client can be subclassed
-class Cosmos(MFCosmos):
+class Cosmos(ManagedCosmos):
     container_name: str = "documents"
     MatchConditions = MatchConditions
 
@@ -127,8 +129,6 @@ class Cosmos(MFCosmos):
             settings.cosmos_dbname,
             self.container_name,
             settings.az_credential(),
-            cosmos_client_ttl_seconds=60*5,
-            lifespan_enabled=False,
         )
 
     async def insert_doc(self, document: dict):
@@ -177,7 +177,7 @@ await client.async_emit_event(
 ```python
 import json
 
-from aio_azure_clients_toolbox.clients.eventhub import ManagedAzureEventhubProducer as MFEventhub
+from aio_azure_clients_toolbox.clients.eventhub import ManagedAzureEventhubProducer
 
 client = ManagedEventhubProducer(
     eventhub_namespace,
@@ -196,7 +196,7 @@ async def send_something(event: dict):
 ```python
 import contextlib
 
-from aio_azure_clients_toolbox import AzureServiceBus
+from aio_azure_clients_toolbox import ManagedAzureServiceBusSender
 
 sbus_client = AzureServiceBus(
     service_bus_namespace_url,
