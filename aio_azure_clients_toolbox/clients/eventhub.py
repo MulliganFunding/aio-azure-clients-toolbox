@@ -45,7 +45,7 @@ class Eventhub:
         )
         self._client: EventHubProducerClient | None = self.get_client()
 
-    def get_client(self):
+    def get_client(self) -> EventHubProducerClient:
         return EventHubProducerClient(
             fully_qualified_namespace=self.evhub_namespace,
             eventhub_name=self.evhub_name,
@@ -54,7 +54,7 @@ class Eventhub:
         )
 
     @property
-    def client(self):
+    def client(self) -> EventHubProducerClient:
         if self._client is None:
             self._client = self.get_client()
         return self._client
@@ -68,7 +68,7 @@ class Eventhub:
         self,
         event: EventData,
         partition_key: str | None = None,
-    ):
+    ) -> EventDataBatch:
         """
         Send a *single* EventHub event which is already encoded as `EventData`.
 
@@ -93,7 +93,7 @@ class Eventhub:
         self,
         event: bytes | str,
         partition_key: str | None = None,
-    ):
+    ) -> EventDataBatch:
         """
         Send a *single* EventHub event. See `send_events_batch` for
         sending multiple events
@@ -119,7 +119,7 @@ class Eventhub:
         self,
         events_list: list[bytes | str],
         partition_key: str | None = None,
-    ):
+    ) -> EventDataBatch:
         """
         Sending events in a batch is more performant than sending individual events.
 
@@ -138,16 +138,18 @@ class Eventhub:
 
         # Send the batch of events to the event hub.
         await self.client.send_batch(event_data_batch)
+        return event_data_batch
 
     async def send_events_data_batch(
         self,
         event_data_batch: EventDataBatch,
-    ):
+    ) -> EventDataBatch:
         """
         Sending events in a batch is more performant than sending individual events.
         """
         # Send the batch of events to the event hub.
         await self.client.send_batch(event_data_batch)
+        return event_data_batch
 
 
 class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
@@ -226,7 +228,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             except AuthenticationError:
                 logger.warning("Eventhub readiness check failed due to authentication error. Cancelling.")
                 logger.error(f"{traceback.format_exc()}")
-                return  False
+                return False
             except EventHubError:
                 logger.warning(f"Eventhub readiness check #{3 - attempts} failed; trying again.")
                 logger.error(f"{traceback.format_exc()}")
@@ -240,7 +242,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         event: EventData,
         partition_key: str | None = None,
-    ):
+    ) -> EventDataBatch:
         """
         Send a *single* EventHub event which is already encoded as `EventData`.
 
@@ -259,15 +261,22 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
 
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
-            await conn.send_batch(event_data_batch)
-            return event_data_batch
+            try:
+                await conn.send_batch(event_data_batch)
+                return event_data_batch
+            except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
+                logger.error(f"Error sending event: {event}")
+                logger.error(f"{traceback.format_exc()}")
+                # Mark this connection closed so it won't be reused
+                await conn.close()
+                raise
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_event")
     async def send_event(
         self,
         event: bytes | str,
         partition_key: str | None = None,
-    ):
+    ) -> EventDataBatch:
         """
         Send a *single* EventHub event. See `send_events_batch` for
         sending multiple events
@@ -303,7 +312,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         events_list: list[bytes | str],
         partition_key: str | None = None,
-    ):
+    ) -> EventDataBatch:
         """
         Sending events in a batch is more performant than sending individual events.
 
@@ -336,7 +345,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
     async def send_events_data_batch(
         self,
         event_data_batch: EventDataBatch,
-    ):
+    ) -> EventDataBatch:
         """
         Sending events in a batch is more performant than sending individual events.
         """
@@ -351,5 +360,3 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
                 # Mark this connection closed so it won't be reused
                 await conn.close()
                 raise
-
-
