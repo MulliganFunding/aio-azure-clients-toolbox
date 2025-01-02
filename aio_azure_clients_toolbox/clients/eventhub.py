@@ -195,9 +195,6 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         )
         self.ready_message = ready_message
 
-    def __getattr__(self, key):
-        return getattr(self.pool, key)
-
     async def create(self):
         """Creates a new connection for our pool"""
         client = Eventhub(
@@ -268,7 +265,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
                 logger.error(f"Error sending event: {event}")
                 logger.error(f"{traceback.format_exc()}")
                 # Mark this connection closed so it won't be reused
-                await conn.close()
+                await self.pool.expire_conn(conn)
                 raise
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_event")
@@ -303,7 +300,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
                 logger.error(f"Error sending event: {event}")
                 logger.error(f"{traceback.format_exc()}")
                 # Mark this connection closed so it won't be reused
-                await conn.close()
+                await self.pool.expire_conn(conn)
                 raise
             return event_data_batch
 
@@ -338,7 +335,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending event: {traceback.format_exc()}")
                 # Mark this connection closed so it won't be reused
-                await conn.close()
+                await self.pool.expire_conn(conn)
                 raise
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_events_data_batch")
@@ -358,5 +355,5 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending batch {traceback.format_exc()}")
                 # Mark this connection closed so it won't be reused
-                await conn.close()
+                await self.pool.expire_conn(conn)
                 raise
