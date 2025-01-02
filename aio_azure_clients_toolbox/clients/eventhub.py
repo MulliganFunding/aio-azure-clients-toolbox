@@ -3,7 +3,13 @@ import traceback
 
 from azure.eventhub import EventData, EventDataBatch, TransportType
 from azure.eventhub.aio import EventHubProducerClient
-from azure.eventhub.exceptions import EventHubError
+from azure.eventhub.exceptions import (
+    AuthenticationError,
+    ClientClosedError,
+    ConnectError,
+    ConnectionLostError,
+    EventHubError,
+)
 from azure.identity.aio import DefaultAzureCredential
 
 from aio_azure_clients_toolbox import connection_pooling
@@ -217,6 +223,10 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
                 # Send the batch of events to the event hub.
                 await conn.send_batch(event_data_batch)
                 return True
+            except AuthenticationError:
+                logger.warning("Eventhub readiness check failed due to authentication error. Cancelling.")
+                logger.error(f"{traceback.format_exc()}")
+                return  False
             except EventHubError:
                 logger.warning(f"Eventhub readiness check #{3 - attempts} failed; trying again.")
                 logger.error(f"{traceback.format_exc()}")
@@ -276,9 +286,15 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             event_data_batch.add(EventData(event))
 
             logger.debug("Sending eventhub batch")
-            # Send the batch of events to the event hub.
-            await conn.send_batch(event_data_batch)
 
+            try:
+                # Send the batch of events to the event hub.
+                await conn.send_batch(event_data_batch)
+            except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
+                logger.error(f"Error sending event: {event}")
+                logger.error(f"{traceback.format_exc()}")
+                await conn.close()
+                raise
             return event_data_batch
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_events_batch")
@@ -306,8 +322,13 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
 
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
-            await conn.send_batch(event_data_batch)
-            return event_data_batch
+            try:
+                await conn.send_batch(event_data_batch)
+                return event_data_batch
+            except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
+                logger.error(f"Error sending event: {traceback.format_exc()}")
+                await conn.close()
+                raise
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_events_data_batch")
     async def send_events_data_batch(
@@ -320,6 +341,12 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         async with self.pool.get() as conn:
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
-            await conn.send_batch(event_data_batch)
-            return event_data_batch
+            try:
+                await conn.send_batch(event_data_batch)
+                return event_data_batch
+            except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
+                logger.error(f"Error sending batch {traceback.format_exc()}")
+                await conn.close()
+                raise
+
 
