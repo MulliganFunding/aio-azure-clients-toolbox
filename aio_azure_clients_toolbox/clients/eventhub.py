@@ -62,7 +62,6 @@ class Eventhub:
         self,
         event: EventData,
         partition_key: str | None = None,
-        log=None,
     ):
         """
         Send a *single* EventHub event which is already encoded as `EventData`.
@@ -79,15 +78,8 @@ class Eventhub:
         # Add events to the batch.
         event_data_batch.add(event)
 
-        try:
-            # Send the batch of events to the event hub.
-            await self.client.send_batch(event_data_batch)
-        except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-            if log is not None:
-                log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-        except EventHubError as eh_err:
-            if log is not None:
-                log.error("Eventhub Sending error: ", eh_err)
+        # Send the batch of events to the event hub.
+        await self.client.send_batch(event_data_batch)
 
         return event_data_batch
 
@@ -95,7 +87,6 @@ class Eventhub:
         self,
         event: bytes | str,
         partition_key: str | None = None,
-        log=None,
     ):
         """
         Send a *single* EventHub event. See `send_events_batch` for
@@ -113,15 +104,8 @@ class Eventhub:
         # Add events to the batch.
         event_data_batch.add(EventData(event))
 
-        try:
-            # Send the batch of events to the event hub.
-            await self.client.send_batch(event_data_batch)
-        except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-            if log is not None:
-                log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-        except EventHubError as eh_err:
-            if log is not None:
-                log.error("Eventhub Sending error: ", eh_err)
+        # Send the batch of events to the event hub.
+        await self.client.send_batch(event_data_batch)
 
         return event_data_batch
 
@@ -129,7 +113,6 @@ class Eventhub:
         self,
         events_list: list[bytes | str],
         partition_key: str | None = None,
-        log=None,
     ):
         """
         Sending events in a batch is more performant than sending individual events.
@@ -147,33 +130,18 @@ class Eventhub:
         for event in events_list:
             event_data_batch.add(EventData(event))
 
-        try:
-            # Send the batch of events to the event hub.
-            await self.client.send_batch(event_data_batch)
-        except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-            if log is not None:
-                log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-        except EventHubError as eh_err:
-            if log is not None:
-                log.error("Eventhub Sending error: ", eh_err)
+        # Send the batch of events to the event hub.
+        await self.client.send_batch(event_data_batch)
 
     async def send_events_data_batch(
         self,
         event_data_batch: EventDataBatch,
-        log=None,
     ):
         """
         Sending events in a batch is more performant than sending individual events.
         """
-        try:
-            # Send the batch of events to the event hub.
-            await self.client.send_batch(event_data_batch)
-        except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-            if log is not None:
-                log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-        except EventHubError as eh_err:
-            if log is not None:
-                log.error("Eventhub Sending error: ", eh_err)
+        # Send the batch of events to the event hub.
+        await self.client.send_batch(event_data_batch)
 
 
 class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
@@ -220,7 +188,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self.ready_message = ready_message
 
     def __getattr__(self, key):
-        return getattr
+        return getattr(self.pool, key)
 
     async def create(self):
         """Creates a new connection for our pool"""
@@ -262,7 +230,6 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         event: EventData,
         partition_key: str | None = None,
-        log=None,
     ):
         """
         Send a *single* EventHub event which is already encoded as `EventData`.
@@ -280,17 +247,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             # Add events to the batch.
             event_data_batch.add(event)
 
-            try:
-                logger.debug("Sending eventhub batch")
-                # Send the batch of events to the event hub.
-                await conn.send_batch(event_data_batch)
-            except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-                if log is not None:
-                    log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-            except EventHubError as eh_err:
-                if log is not None:
-                    log.error("Eventhub Sending error: ", eh_err)
-
+            logger.debug("Sending eventhub batch")
+            # Send the batch of events to the event hub.
+            await conn.send_batch(event_data_batch)
             return event_data_batch
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_event")
@@ -298,7 +257,6 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         event: bytes | str,
         partition_key: str | None = None,
-        log=None,
     ):
         """
         Send a *single* EventHub event. See `send_events_batch` for
@@ -317,16 +275,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             # Add events to the batch.
             event_data_batch.add(EventData(event))
 
-            try:
-                logger.debug("Sending eventhub batch")
-                # Send the batch of events to the event hub.
-                await conn.send_batch(event_data_batch)
-            except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-                if log is not None:
-                    log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-            except EventHubError as eh_err:
-                if log is not None:
-                    log.error("Eventhub Sending error: ", eh_err)
+            logger.debug("Sending eventhub batch")
+            # Send the batch of events to the event hub.
+            await conn.send_batch(event_data_batch)
 
             return event_data_batch
 
@@ -335,7 +286,6 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         events_list: list[bytes | str],
         partition_key: str | None = None,
-        log=None,
     ):
         """
         Sending events in a batch is more performant than sending individual events.
@@ -354,34 +304,22 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             for event in events_list:
                 event_data_batch.add(EventData(event))
 
-            try:
-                logger.debug("Sending eventhub batch")
-                # Send the batch of events to the event hub.
-                await conn.send_batch(event_data_batch)
-            except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-                if log is not None:
-                    log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-            except EventHubError as eh_err:
-                if log is not None:
-                    log.error("Eventhub Sending error: ", eh_err)
+            logger.debug("Sending eventhub batch")
+            # Send the batch of events to the event hub.
+            await conn.send_batch(event_data_batch)
+            return event_data_batch
 
     @connection_pooling.send_time_deco(logger, "Eventhub.send_events_data_batch")
     async def send_events_data_batch(
         self,
         event_data_batch: EventDataBatch,
-        log=None,
     ):
         """
         Sending events in a batch is more performant than sending individual events.
         """
         async with self.pool.get() as conn:
-            try:
-                logger.debug("Sending eventhub batch")
-                # Send the batch of events to the event hub.
-                await conn.send_batch(event_data_batch)
-            except ValueError:  # Size exceeds limit. This shouldn't happen if you make sure before hand.
-                if log is not None:
-                    log.error("Eventhub Size of the event data list exceeds the size limit of a single send")
-            except EventHubError as eh_err:
-                if log is not None:
-                    log.error("Eventhub Sending error: ", eh_err)
+            logger.debug("Sending eventhub batch")
+            # Send the batch of events to the event hub.
+            await conn.send_batch(event_data_batch)
+            return event_data_batch
+
