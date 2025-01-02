@@ -293,6 +293,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending event: {event}")
                 logger.error(f"{traceback.format_exc()}")
+                # Mark this connection closed so it won't be reused
                 await conn.close()
                 raise
             return event_data_batch
@@ -327,6 +328,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
                 return event_data_batch
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending event: {traceback.format_exc()}")
+                # Mark this connection closed so it won't be reused
                 await conn.close()
                 raise
 
@@ -346,6 +348,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
                 return event_data_batch
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending batch {traceback.format_exc()}")
+                # Mark this connection closed so it won't be reused
                 await conn.close()
                 raise
 
