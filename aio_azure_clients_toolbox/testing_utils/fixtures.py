@@ -314,6 +314,7 @@ def mockservicebus(monkeysession):  # type: ignore
     )
     mocksb._receiver = receiver_client
     mocksb._sender = sender_client
+    sender_client.schedule_messages = mock.AsyncMock()
 
     return mocksb
 
@@ -321,6 +322,15 @@ def mockservicebus(monkeysession):  # type: ignore
 @pytest.fixture()
 def sbus(mockservicebus):
     return clients.service_bus.AzureServiceBus(
+        "https://sbus.example.com",
+        "fake-queue-name",
+        mock.AsyncMock(),  # fake credential
+    )
+
+
+@pytest.fixture()
+def managed_sbus(mockservicebus):
+    return clients.service_bus.ManagedAzureServiceBusSender(
         "https://sbus.example.com",
         "fake-queue-name",
         mock.AsyncMock(),  # fake credential
