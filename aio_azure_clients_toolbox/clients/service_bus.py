@@ -13,6 +13,13 @@ from azure.core import exceptions
 from azure.identity.aio import DefaultAzureCredential
 from azure.servicebus import ServiceBusMessage, ServiceBusReceiveMode
 from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver, ServiceBusSender
+from azure.servicebus.exceptions import (
+    ServiceBusAuthenticationError,
+    ServiceBusAuthorizationError,
+    ServiceBusCommunicationError,
+    ServiceBusConnectionError,
+    ServiceBusError,
+)
 
 from aio_azure_clients_toolbox import connection_pooling
 
@@ -169,8 +176,16 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             try:
                 await conn.schedule_messages(message, now)
                 return True
-            except (AttributeError, exceptions.AzureError):
-                logger.warning(f"ServiceBus readiness check #{3 - attempts} failed; trying again.")
+            except (ServiceBusAuthorizationError, ServiceBusAuthenticationError):
+                # We do not believe these will improve with repeated tries
+                logger.error(
+                    "ServiceBus Authorization or Authentication error. Not ready."
+                )
+                raise
+            except (AttributeError, ServiceBusError, exceptions.AzureError):
+                logger.warning(
+                    f"ServiceBus readiness check #{3 - attempts} failed; trying again."
+                )
                 logger.error(f"{traceback.format_exc()}")
                 attempts -= 1
 
@@ -183,4 +198,16 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
         async with self.pool.get() as conn:
-            await conn.schedule_messages(message, scheduled_time_utc)
+            try:
+                await conn.schedule_messages(message, scheduled_time_utc)
+            except (
+                ServiceBusCommunicationError,
+                ServiceBusAuthorizationError,
+                ServiceBusAuthenticationError,
+                ServiceBusConnectionError,
+            ):
+                logger.error(
+                    f"ServiceBus.send_message failed: {traceback.format_exc()}"
+                )
+                await self.pool.expire_conn(conn)
+                raise
