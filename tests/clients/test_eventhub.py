@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 from aio_azure_clients_toolbox.clients import eventhub
 from azure.eventhub import EventData, EventDataBatch
-from azure.eventhub.exceptions import ClientClosedError
+from azure.eventhub.exceptions import AuthenticationError, ClientClosedError, ConnectError
 
 # Three calls to send a ready message
 READY_MESSAGE_METHOD_CALLS = ["create_batch", "add", "send"]
@@ -99,6 +99,18 @@ def mockehub_throwing(request, mockehub):
         # We need the *first* (readiness) call to succeed, and the second to fail
         mockehub.send_batch.side_effect = [None, ClientClosedError("test")]
     return (mockehub, request.param)
+
+
+async def test_ready_auth_failure(mockehub, managed_ehub):
+    mockehub.send_batch.side_effect = AuthenticationError("test")
+    assert not await managed_ehub.ready(mockehub)
+    assert mockehub.send_batch.call_count == 1
+
+
+async def test_ready_connect_failure(mockehub, managed_ehub):
+    mockehub.send_batch.side_effect = ConnectError("test")
+    assert not await managed_ehub.ready(mockehub)
+    assert mockehub.send_batch.call_count == 2
 
 
 async def test_managed_evhub_send_event(mockehub_throwing, managed_ehub):
