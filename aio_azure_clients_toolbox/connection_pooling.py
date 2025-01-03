@@ -190,6 +190,14 @@ class SharedTransportConnection:
         self._id = (binascii.hexlify(os.urandom(3))).decode()
         self._ready = anyio.Event()
 
+    def __bool__(self):
+        if self._connection is None:
+            return False
+        return self.is_ready and not self.expired
+
+    def eq(self, connection: AbstractConnection) -> bool:
+        return self._connection is connection
+
     @property
     def available(self):
         """Check if connection exists and client usage limit has been reached"""
@@ -436,8 +444,6 @@ class ConnectionPool:
         self.max_size = max_size
         if self.max_size < 1:
             raise ValueError("max_size must a postive integer")
-        # Number of available connections
-        self.connections: int = 0
         self.connector = connector
 
         # A pool is just a heap of connection-managing things
@@ -497,3 +503,20 @@ class ConnectionPool:
         async with create_task_group() as tg:
             for conn in self._pool:
                 tg.start_soon(conn.close)
+
+    @property
+    def ready_connection_count(self):
+        return sum(1 for conn in self._pool if conn)
+
+    async def expire_conn(self, connection: AbstractConnection) -> None:
+        """
+        Expire a connection.
+        Because we yield AbstractConnections while our pool is SharedTransportConnections,
+        we need to give clients a way to look up a connection and expire it directly.
+        """
+        for conn in self._pool:
+            if conn.eq(connection):
+                await conn.close()
+                break
+        heapq.heapify(self._pool)
+        return None
