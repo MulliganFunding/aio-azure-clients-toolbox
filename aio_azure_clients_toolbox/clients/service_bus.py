@@ -206,8 +206,8 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
                 ServiceBusAuthenticationError,
                 ServiceBusConnectionError,
             ):
-                logger.error(
-                    f"ServiceBus.send_message failed: {traceback.format_exc()}"
+                logger.exception(
+                    f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
                 )
                 await self.pool.expire_conn(conn)
                 raise
