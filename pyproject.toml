@@ -1,6 +1,6 @@
 [project]
 name = "aio-azure-clients-toolbox"
-version = "0.2.1"
+version = "0.2.2"
 description = "Async Azure Clients Mulligan Python projects"
 authors = [
     { "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" },
@@ -49,7 +49,7 @@ where = ["."]
 minversion = "8.3"
 pythonpath = "."
 asyncio_mode = "auto"
-xfail_strict = "True"
+xfail_strict = true
 addopts = "--cov-report term:skip-covered --cov=aio_azure_clients_toolbox --strict-config --strict-markers --cov-report html"
 testpaths = [
     "tests",
