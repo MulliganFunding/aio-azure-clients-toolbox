@@ -260,6 +260,21 @@ def cosmos_patchable(async_cosmos):
     yield container_mock, set_return
 
 
+@pytest.fixture()
+def cosmos_upsertable(async_cosmos):
+    """Patch `patch_item` on container_mock.
+
+    Note: this is a lot simpler than returning what read_item returns.
+    """
+    _, container_mock = async_cosmos
+
+    def set_return(return_value, side_effect=None):
+        container_mock.upsert_item.return_value = return_value
+        container_mock.upsert_item.side_effect = side_effect
+
+    yield container_mock, set_return
+
+
 @pytest.fixture(autouse=True)
 def mockehub(monkeypatch):  # type: ignore
     """Mock out Azure Blob Service client"""
