@@ -114,6 +114,11 @@ class ConnectionManager:
     async def recycle_container(self):
         if self._client is not None:
             await self._client.close()
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.warning("Error closing credential: %s", exc)
+
         self._client = None
         self._database = None
         self._container = None
@@ -327,7 +332,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         try:
             await self.credential.close()
         except Exception as exc:
-            logger.exception(f"Credential close failed with {exc}")
+            logger.warning(f"Credential close failed with {exc}")
 
     @asynccontextmanager
     async def get_container_client(self):

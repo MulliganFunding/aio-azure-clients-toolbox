@@ -168,7 +168,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         try:
             await self.credential.close()
         except Exception as exc:
-            logger.exception(f"Credential close failed with {exc}")
+            logger.warning(f"Credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
     async def ready(self, conn: ServiceBusSender) -> bool:
