@@ -324,6 +324,10 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.exception(f"Credential close failed with {exc}")
 
     @asynccontextmanager
     async def get_container_client(self):

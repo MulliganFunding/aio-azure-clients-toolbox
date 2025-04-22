@@ -1,6 +1,6 @@
 [project]
 name = "aio-azure-clients-toolbox"
-version = "0.2.2"
+version = "0.3.0"
 description = "Async Azure Clients Mulligan Python projects"
 authors = [
     { "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" },
@@ -29,13 +29,13 @@ Releases = "https://github.com/MulliganFunding/aio-azure-clients-toolbox/release
 dev-dependencies = [
     "build>=1.2.1",
     "asgi-lifespan>=2.1.0",
-    "pytest>=8.3.3",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=6.1.1",
     "pytest-mypy>=0.10.3",
-    "ruff>=0.6",
-    "types-aiofiles>=24.1.0.20240626",
-    "types-requests>=2.32.0.20240712",
+    "ruff>=0.11.6",
+    "types-aiofiles>=24.1.0.20250326",
+    "types-requests>=2.32.0.20250328",
 ]
 
 [build-system]
