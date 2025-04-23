@@ -208,6 +208,11 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.exception(f"Credential close failed with {exc}")
+
 
     @connection_pooling.send_time_deco(logger, "Eventhub.ready")
     async def ready(self, conn: EventHubProducerClient) -> bool:

@@ -165,6 +165,10 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.warning(f"Credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
     async def ready(self, conn: ServiceBusSender) -> bool:
