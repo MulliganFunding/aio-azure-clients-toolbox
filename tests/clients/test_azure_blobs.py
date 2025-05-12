@@ -7,6 +7,7 @@ import aiofiles
 import pytest
 from aio_azure_clients_toolbox.clients import azure_blobs
 from azure.core.exceptions import HttpResponseError
+from azure.storage.blob import BlobProperties
 
 FNAME = ".A fi~lename~ #with-12? unsafe chars \\ \t \\ ;  ü.pdf."
 FNAME_DROPPED_CHARS = azure_blobs.DISALLOWED_CHARS_PAT.sub("", FNAME)
@@ -102,13 +103,13 @@ async def test_delete_blob(with_error, absc, mock_azureblob):
 
 async def test_download_blob(absc, mock_azureblob):
     _, _, set_return = mock_azureblob
-    set_return(b"HEY")
+    set_return.download_blob_returns(b"HEY")
     assert await absc.download_blob("some-blob") == b"HEY"
 
 
 async def test_download_blob_to_dir(absc, mock_azureblob):
     _, _, set_return = mock_azureblob
-    set_return(b"HEY")
+    set_return.download_blob_returns(b"HEY")
     with tempfile.TemporaryDirectory() as tempdir:
         new_path = await absc.download_blob_to_dir(tempdir, "blob.bla")
         assert os.path.exists(new_path)
@@ -145,3 +146,18 @@ async def test_upload_blob(with_error, absc, mock_azureblob):
         for call in mockblobc.upload_blob.call_args_list:
             assert call[0][0] == "somedata"
             assert call[1]["blob_type"] == "BlockBlob"
+
+
+async def test_list_blobs(absc, mock_azureblob):
+    # We don't have a specific implementation of this method, but we need to make sure
+    # our pytest fixture for it works.
+    container_client, _, set_return = mock_azureblob
+    set_return.list_blobs_returns([
+        BlobProperties(name="some-blob", last_modified="2023-01-01T00:00:00Z"),
+        BlobProperties(name="some-blob2", last_modified="2023-01-01T00:00:00Z"),
+        BlobProperties(name="some-blob3", last_modified="2023-01-01T00:00:00Z"),
+    ])
+
+    blob_names = [b.name async for b in container_client.list_blobs()]
+    assert len(blob_names) == 3
+    assert blob_names == ["some-blob", "some-blob2", "some-blob3"]
