@@ -254,6 +254,12 @@ async def test_get_blob_sas_token(absc, mock_azureblob, mocksas):
     assert permission.read and not permission.write
 
 
+async def test_download_blob(absc, mock_azureblob):
+    _, _, set_return = mock_azureblob
+    set_return.download_blob_returns(b"HEY")
+    assert await absc.download_blob("some-blob") == b"HEY"
+
+
 @pytest.fixture()
 def cos_client(test_config):
     return cosmos.Cosmos(test_config)

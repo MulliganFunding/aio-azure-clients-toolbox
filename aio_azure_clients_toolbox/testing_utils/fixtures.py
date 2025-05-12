@@ -81,9 +81,12 @@ def mocksas():
 async def mock_azureblob(monkeypatch):  # type: ignore
     """Mock out Azure Blob Service client"""
     mockblobc = mock.MagicMock(BlobClient)
+    # Parent: also, container client, delivers a blob client
     inner_client = mock.Mock()
     mockbsc = mock.Mock(return_value=make_async_ctx_mgr(inner_client))
+    inner_client.get_container_client = mock.Mock(return_value=make_async_ctx_mgr(inner_client))
     inner_client.get_blob_client = mock.PropertyMock(return_value=mockblobc)
+    inner_client.delete_blobs = mock.AsyncMock()
     monkeypatch.setattr(clients.azure_blobs, "BlobServiceClient", mockbsc)
     inner_client.get_user_delegation_key = mock.AsyncMock()
     mockblobc.upload_blob_from_url = mock.AsyncMock()
@@ -91,19 +94,35 @@ async def mock_azureblob(monkeypatch):  # type: ignore
     mockblobc.delete_blob = mock.AsyncMock()
 
     def set_download_return(return_value, side_effect=None):
-        async_iter_thing = AsyncIterImplementation()
-        async_iter_thing.return_value = return_value
+        """
+        Set the return value for the download_blob method and list_blobs method.
+        """
+        # For `async for` with `download_blob`
+        async_downloader = AsyncIterImplementation()
+        async_downloader.return_value = return_value
+        if side_effect is not None:
+            async_downloader.side_effect = side_effect
+
         chunks_thing = mock.Mock(
             **{
                 "readall": mock.AsyncMock(return_value=return_value),
-                "chunks.return_value": async_iter_thing,
+                "chunks.return_value": async_downloader,
             }
         )
         mockblobc.download_blob.return_value = chunks_thing
-        if side_effect is not None:
-            async_iter_thing.side_effect = side_effect
 
-    return inner_client, mockblobc, set_download_return
+    def set_list_blobs_return(list_or_side_effect):
+        # For `async for` with `list_blobs`
+        async_lister = AsyncIterImplementation()
+        async_lister.side_effect = list_or_side_effect
+        inner_client.list_blobs.return_value = async_lister
+
+    class SetReturns:
+        def __init__(self):
+            self.download_blob_returns = set_download_return
+            self.list_blobs_returns = set_list_blobs_return
+
+    return inner_client, mockblobc, SetReturns()
 
 
 @pytest.fixture()
