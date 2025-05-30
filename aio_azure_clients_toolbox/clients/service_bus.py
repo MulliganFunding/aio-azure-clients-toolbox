@@ -8,6 +8,7 @@ subscribing to a queue.
 import datetime
 import logging
 import traceback
+from contextlib import asynccontextmanager
 
 from azure.core import exceptions
 from azure.identity.aio import DefaultAzureCredential
@@ -69,12 +70,30 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
+    @asynccontextmanager
+    async def client_async(self):
+        self._validate_access_settings()
+        async with self.credential:
+            yield ServiceBusClient(self.namespace_url, self.credential)
+
+    async def get_receiver_async(self) -> ServiceBusReceiver:
+        async with self.client_async() as client:
+            self._receiver_client = client.get_queue_receiver(
+                queue_name=self.queue_name, receive_mode=ServiceBusReceiveMode.PEEK_LOCK
+            )
+            return self._receiver_client
+
     def get_sender(self) -> ServiceBusSender:
         if self._sender_client is not None:
             return self._sender_client
 
         self._sender_client = self.client.get_queue_sender(queue_name=self.queue_name)
         return self._sender_client
+
+    async def get_sender_async(self) -> ServiceBusSender:
+        async with self.client_async() as client:
+            self._sender_client = client.get_queue_sender(queue_name=self.queue_name)
+            return self._sender_client
 
     async def close(self):
         if self._receiver_client is not None:
@@ -93,7 +112,7 @@ class AzureServiceBus:
         message = ServiceBusMessage(msg)
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
-        sender = self.get_sender()
+        sender = await self.get_sender_async()
         await sender.schedule_messages(message, scheduled_time_utc)
 
 
@@ -146,9 +165,21 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         )
         return client.get_sender()
 
+    async def get_sender_async(self) -> ServiceBusSender:
+        """
+        Proxy for AzureServiceBus.get_sender_async. Here
+        for consistency with above class.
+        """
+        client = AzureServiceBus(
+            self.service_bus_namespace_url,
+            self.service_bus_queue_name,
+            self.credential,
+        )
+        return await client.get_sender_async()
+
     async def create(self) -> ServiceBusSender:
         """Creates a new connection for our pool"""
-        return self.get_sender()
+        return await self.get_sender_async()
 
     def get_receiver(self) -> ServiceBusReceiver:
         """
@@ -161,6 +192,18 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             self.credential,
         )
         return client.get_receiver()
+
+    async def get_receiver_async(self) -> ServiceBusReceiver:
+        """
+        Proxy for AzureServiceBus.get_receiver_async. Here
+        for consistency with above class.
+        """
+        client = AzureServiceBus(
+            self.service_bus_namespace_url,
+            self.service_bus_queue_name,
+            self.credential,
+        )
+        return await client.get_receiver_async()
 
     async def close(self):
         """Closes all connections in our pool"""
