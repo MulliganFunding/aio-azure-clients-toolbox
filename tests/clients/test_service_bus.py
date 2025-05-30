@@ -26,6 +26,20 @@ async def test_get_sender(sbus, mockservicebus):
     assert sbus.get_sender() is sender
 
 
+async def test_get_receiver_async(sbus, mockservicebus):
+    receiver = await sbus.get_receiver_async()
+    await receiver.bla()
+    assert mockservicebus._receiver.method_calls
+    assert await sbus.get_receiver_async() is receiver
+
+
+async def test_get_sender_async(sbus, mockservicebus):
+    sender = await sbus.get_sender_async()
+    await sender.bla()
+    assert mockservicebus._sender.method_calls
+    assert await sbus.get_sender_async() is sender
+
+
 async def test_close(sbus):
     # Make sure these things are bootstrapped
     sbus.get_receiver()
