@@ -8,8 +8,8 @@ subscribing to a queue.
 import datetime
 import logging
 import traceback
-from contextlib import asynccontextmanager
 
+import anyio
 from azure.core import exceptions
 from azure.identity.aio import DefaultAzureCredential
 from azure.servicebus import ServiceBusMessage, ServiceBusReceiveMode
@@ -46,8 +46,10 @@ class AzureServiceBus:
         self.queue_name = service_bus_queue_name
         self.credential = credential
         self._client: ServiceBusClient | None = None
+        self._client_is_open: bool = False
         self._receiver_client: ServiceBusReceiver | None = None
         self._sender_client: ServiceBusSender | None = None
+        self.client_open_close_lock = anyio.Lock()
 
     def _validate_access_settings(self):
         if not all((self.namespace_url, self.queue_name, self.credential)):
@@ -61,6 +63,29 @@ class AzureServiceBus:
             self._client = ServiceBusClient(self.namespace_url, self.credential)
         return self._client
 
+    async def setup_async_client(self):
+        """Create an async ServiceBusClient and immediately open the connection."""
+        if self._client is not None:
+            # Client created, but we need to open
+            if not self._client_is_open:
+                async with self.client_open_close_lock:
+                    # We want to close the credential immediately, but we want to keep the client open
+                    async with self.credential:
+                        await self._client.__aenter__() # Must call close explicitly later
+                        self._client_is_open = True
+
+            return self._client
+
+        self._validate_access_settings()
+        self._client = ServiceBusClient(self.namespace_url, self.credential)
+        async with self.client_open_close_lock:
+            # We want to close the credential immediately, but we want to keep the client open
+            async with self.credential:
+                await self._client.__aenter__() # Must call close explicitly later
+                self._client_is_open = True
+
+        return self._client
+
     def get_receiver(self) -> ServiceBusReceiver:
         if self._receiver_client is not None:
             return self._receiver_client
@@ -70,18 +95,17 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    @asynccontextmanager
-    async def client_async(self):
-        self._validate_access_settings()
-        async with self.credential:
-            yield ServiceBusClient(self.namespace_url, self.credential)
-
-    async def get_receiver_async(self) -> ServiceBusReceiver:
-        async with self.client_async() as client:
-            self._receiver_client = client.get_queue_receiver(
-                queue_name=self.queue_name, receive_mode=ServiceBusReceiveMode.PEEK_LOCK
-            )
+    async def get_receiver_async(self):
+        if self._receiver_client is not None:
             return self._receiver_client
+
+        # Make sure the async client is set up (created and opened)
+        await self.setup_async_client()
+
+        self._receiver_client = self._client.get_queue_receiver(
+            queue_name=self.queue_name, receive_mode=ServiceBusReceiveMode.PEEK_LOCK
+        )
+        return self._receiver_client
 
     def get_sender(self) -> ServiceBusSender:
         if self._sender_client is not None:
@@ -90,10 +114,14 @@ class AzureServiceBus:
         self._sender_client = self.client.get_queue_sender(queue_name=self.queue_name)
         return self._sender_client
 
-    async def get_sender_async(self) -> ServiceBusSender:
-        async with self.client_async() as client:
-            self._sender_client = client.get_queue_sender(queue_name=self.queue_name)
+    async def get_sender_async(self):
+        if self._sender_client is not None:
             return self._sender_client
+
+        # Make sure the async client is set up (created and opened)
+        await self.setup_async_client()
+        self._sender_client = self._client.get_queue_sender(queue_name=self.queue_name)
+        return self._sender_client
 
     async def close(self):
         if self._receiver_client is not None:
@@ -105,7 +133,10 @@ class AzureServiceBus:
             self._sender_client = None
 
         if self._client is not None:
-            await self._client.close()
+            if self._client_is_open:
+                async with self.client_open_close_lock:
+                    await self._client.__aexit__(None, None, None)
+
             self._client = None
 
     async def send_message(self, msg: str, delay: int = 0):
@@ -165,7 +196,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         )
         return client.get_sender()
 
-    async def get_sender_async(self) -> ServiceBusSender:
+    async def get_sender_async(self):
         """
         Proxy for AzureServiceBus.get_sender_async. Here
         for consistency with above class.
@@ -193,7 +224,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         )
         return client.get_receiver()
 
-    async def get_receiver_async(self) -> ServiceBusReceiver:
+    async def get_receiver_async(self):
         """
         Proxy for AzureServiceBus.get_receiver_async. Here
         for consistency with above class.
@@ -244,17 +275,18 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         message = ServiceBusMessage(msg)
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
-        async with self.pool.get() as conn:
-            try:
-                await conn.schedule_messages(message, scheduled_time_utc)
-            except (
-                ServiceBusCommunicationError,
-                ServiceBusAuthorizationError,
-                ServiceBusAuthenticationError,
-                ServiceBusConnectionError,
-            ):
-                logger.exception(
-                    f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
-                )
-                await self.pool.expire_conn(conn)
-                raise
+        async with self.pool.get() as client:
+            async with client as conn:
+                try:
+                    await conn.schedule_messages(message, scheduled_time_utc)
+                except (
+                    ServiceBusCommunicationError,
+                    ServiceBusAuthorizationError,
+                    ServiceBusAuthenticationError,
+                    ServiceBusConnectionError,
+                ):
+                    logger.exception(
+                        f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
+                    )
+                    await self.pool.expire_conn(conn)
+                    raise
