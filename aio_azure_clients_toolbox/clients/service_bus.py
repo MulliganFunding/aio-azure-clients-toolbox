@@ -133,9 +133,8 @@ class AzureServiceBus:
             self._sender_client = None
 
         if self._client is not None:
-            if self._client_is_open:
-                async with self.client_open_close_lock:
-                    await self._client.__aexit__(None, None, None)
+            async with self.client_open_close_lock:
+                await self._client.__aexit__(None, None, None)
 
             self._client = None
 
