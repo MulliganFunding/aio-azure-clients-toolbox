@@ -15,7 +15,7 @@ from azure.identity.aio import DefaultAzureCredential
 from aio_azure_clients_toolbox import connection_pooling
 
 TRANSPORT_PURE_AMQP = "amqp"
-EVENTHUB_SEND_TTL_SECONDS = 400
+EVENTHUB_SEND_TTL_SECONDS = 220
 logger = logging.getLogger(__name__)
 
 
