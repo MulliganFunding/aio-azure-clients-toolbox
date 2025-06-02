@@ -79,10 +79,12 @@ class AzureServiceBus:
         self._validate_access_settings()
         self._client = ServiceBusClient(self.namespace_url, self.credential)
         async with self.client_open_close_lock:
-            # We want to close the credential immediately, but we want to keep the client open
-            async with self.credential:
-                await self._client.__aenter__() # Must call close explicitly later
-                self._client_is_open = True
+            # It is possible that some other async task has already created the client
+            if not self._client_is_open:
+                # We want to close the credential immediately, but we want to keep the client open
+                async with self.credential:
+                    await self._client.__aenter__() # Must call close explicitly later
+                    self._client_is_open = True
 
         return self._client
 
@@ -274,18 +276,17 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         message = ServiceBusMessage(msg)
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
-        async with self.pool.get() as client:
-            async with client as conn:
-                try:
-                    await conn.schedule_messages(message, scheduled_time_utc)
-                except (
-                    ServiceBusCommunicationError,
-                    ServiceBusAuthorizationError,
-                    ServiceBusAuthenticationError,
-                    ServiceBusConnectionError,
-                ):
-                    logger.exception(
-                        f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
-                    )
-                    await self.pool.expire_conn(conn)
-                    raise
+        async with self.pool.get() as conn:
+            try:
+                await conn.schedule_messages(message, scheduled_time_utc)
+            except (
+                ServiceBusCommunicationError,
+                ServiceBusAuthorizationError,
+                ServiceBusAuthenticationError,
+                ServiceBusConnectionError,
+            ):
+                logger.exception(
+                    f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
+                )
+                await self.pool.expire_conn(conn)
+                raise

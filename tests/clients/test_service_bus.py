@@ -111,7 +111,7 @@ async def test_ready_connect_failure(mockservicebus, managed_sbus):
 
 
 async def test_managed_sbus_send_message(managed_sbus_throwing, managed_sbus):
-    mockservicebus, should_throw = managed_sbus_throwing
+    _mockservicebus, should_throw = managed_sbus_throwing
     expect_call_count = 2
     if should_throw:
         with pytest.raises(ServiceBusConnectionError):
