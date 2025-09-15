@@ -343,4 +343,9 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         for a while.
         """
         async with self.pool.get() as conn:
-            yield conn
+            try:
+                yield conn
+            except RuntimeError as e:
+                logger.error(f"RuntimeError occurred; Closing connection: {e}")
+                await self.pool.expire_conn(conn)
+                raise
