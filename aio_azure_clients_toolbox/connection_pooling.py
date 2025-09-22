@@ -5,6 +5,7 @@ The idea for our Azure clients is that unlike database connections
 *all of our clients can be reused* across multiple requesters.
 
 What we really need to achieve is the following:
+
 - A "pool" of connections, where
 - Each connection may be shared by more than 1 requester, and
 - Each connection has an idle lifespan.
