@@ -47,3 +47,4 @@ docs-build *args:
 # Serve documentation locally with auto-reload
 docs-serve:
     uv run --group docs mkdocs serve
+

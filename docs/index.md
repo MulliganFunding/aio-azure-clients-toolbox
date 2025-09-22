@@ -43,9 +43,8 @@ This library's `SharedTransportConnection` pattern allows multiple Azure SDK cli
 | Metric | Direct Azure SDK | Connection Pooling | Improvement |
 |--------|------------------|-------------------|-------------|
 | **Connection Time** | 100-900ms per operation | 1-5ms after warmup | **20-100x faster** |
-| **Memory Usage** | High (new client per op) | Low (shared connections) | **5-10x reduction** |
 | **Concurrency** | Limited by connection overhead | Up to `client_limit × pool_size` | **10-50x higher** |
-| **Resource Efficiency** | Poor (connect/disconnect cycles) | Excellent (persistent connections) | **Dramatic improvement** |
+| **Resource Efficiency** | Poor (connect/disconnect cycles) | Improved (persistent connections) | ... |
 
 ## Supported Azure Services
 
