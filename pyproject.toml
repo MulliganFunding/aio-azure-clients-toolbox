@@ -25,17 +25,23 @@ Repository = "https://github.com/MulliganFunding/aio-azure-clients-toolbox"
 Documentation = "https://github.com/MulliganFunding/aio-azure-clients-toolbox"
 Releases = "https://github.com/MulliganFunding/aio-azure-clients-toolbox/releases"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "build>=1.3.0",
     "asgi-lifespan>=2.1.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-cov>=7.0.0",
     "pytest-mypy>=1.0.1",
-    "ruff>=0.13.0",
-    "types-aiofiles>=24.1.0.20250326",
+    "ruff>=0.13.1",
+    "types-aiofiles>=24.1.0.20250822",
     "types-requests>=2.32.4.20250913",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.6.20",
+    "mkdocstrings[python]>=0.24.0",
+    "mkdocs-mermaid2-plugin>=1.1.0",
 ]
 
 [build-system]
