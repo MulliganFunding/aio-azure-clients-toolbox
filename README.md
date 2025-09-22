@@ -22,14 +22,6 @@ High-performance async Python library for Azure SDK clients with intelligent con
 - **[Quick Start Guide](https://mulliganfunding.github.io/aio-azure-clients-toolbox/installation/)**
 - **[Connection Pooling Deep Dive](https://mulliganfunding.github.io/aio-azure-clients-toolbox/connection-pooling/)** - Technical details with diagrams.
 
-## Performance Table
-
-| Metric | Direct Azure SDK | Connection Pooling | Improvement |
-|--------|------------------|-------------------|-------------|
-| **Connection Time** | 100-500ms per operation | 1-5ms after warmup | **20-100x faster** |
-| **Memory Usage** | High (new client per op) | Low (shared connections) | **5-10x reduction** |
-| **Concurrency** | Limited by connection overhead | Up to `client_limit × pool_size` | **10-50x higher** |
-
 ## Installation
 
 ```bash
