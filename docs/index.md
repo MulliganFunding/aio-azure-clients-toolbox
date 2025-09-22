@@ -1,8 +1,8 @@
 # AIO Azure Clients Toolbox
 
-High-performance async Python library for Azure SDK clients with connection pooling.
+Async Python library for Azure SDK clients with connection pooling.
 
-## The Connection Pooling Advantage
+## Connection Pooling Benefits
 
 Following the async Python examples from the Azure SDK for services such as `Eventhub` and `ServiceBus` usage creates a new connection for each operation.
 
@@ -28,14 +28,15 @@ async with cosmos_client.get_container_client() as container:
     await container.create_item({"id": "1"})  # 2ms after pool warmup; connection client remains alive for TTL duration
 ```
 
-## Core Innovation: SharedTransportConnection
+## The `SharedTransportConnection` class
 
-The library's core innovation is the `SharedTransportConnection` pattern that allows multiple Azure SDK clients to safely share a single underlying connection:
+This library's `SharedTransportConnection` pattern allows multiple Azure SDK clients to safely share a single underlying connection:
 
-- **Semaphore-based client limiting**: Controls concurrent operations per connection
-- **Heap-optimized connection selection**: O(log n) selection of optimal connections
-- **Automatic lifecycle management**: Handles connection expiration and renewal
-- **Lock-free design**: Minimizes contention in high-concurrency scenarios
+- **Semaphore-based client limiting**: Controls concurrent operations per connection.
+- **Heap-optimized connection selection**: O(log n) selection of optimal connections.
+- **Automatic lifecycle management**: Handles connection expiration and renewal.
+- **Lock-free design**: Minimizes contention in high-concurrency scenarios.
+- **Critical-sections locking**: Some locking is still required, when opening, closing, and establishing connection-readiness.
 
 ## Performance Comparison
 
