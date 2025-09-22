@@ -38,7 +38,7 @@ This library's `SharedTransportConnection` pattern allows multiple Azure SDK cli
 - **Lock-free design**: Minimizes contention in high-concurrency scenarios.
 - **Critical-sections locking**: Some locking is still required, when opening, closing, and establishing connection-readiness.
 
-## Performance Comparison
+## Performance Table
 
 | Metric | Direct Azure SDK | Connection Pooling | Improvement |
 |--------|------------------|-------------------|-------------|

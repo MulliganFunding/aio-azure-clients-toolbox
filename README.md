@@ -1,41 +1,34 @@
 # AIO Azure Clients Toolbox
 
+
+[![Tests](https://github.com/MulliganFunding/aio-azure-clients-toolbox/workflows/Tests/badge.svg)](https://github.com/MulliganFunding/aio-azure-clients-toolbox/actions)
 [![PyPI version](https://badge.fury.io/py/aio-azure-clients-toolbox.svg)](https://badge.fury.io/py/aio-azure-clients-toolbox)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-github--pages-blue.svg)](https://mulliganfunding.github.io/aio-azure-clients-toolbox/)
 
 High-performance async Python library for Azure SDK clients with intelligent connection pooling.
 
-## 🚀 Key Features
+## Features
 
-- **20-100x Performance Improvement**: Connection pooling reduces operation latency from 100-900ms to 1-5ms
-- **Intelligent Connection Management**: Automatic lifecycle management with semaphore-based client limiting
-- **Azure SDK Integration**: Wrappers for Cosmos DB, Event Hub, Service Bus, Blob Storage, and Event Grid
-- **Testing Utilities**: Includes pytest fixtures for mocking Azure services
 - **Async apps**: Built for high-concurrency async applications: we have used this in production at Mulligan Funding for a few years.
+- **20-100x Performance Improvement**: Connection pooling reduces operation latency for *some services* from 100-900ms to 1-5ms.
+- **Intelligent Connection Management**: Automatic lifecycle management with semaphore-based client limiting.
+- **Azure SDK Integration**: Wrappers for Cosmos DB, EventHub, Service Bus, Blob Storage, and EventGrid.
+- **Testing Utilities**: Includes pytest fixtures for mocking Azure services.
 
-## 📚 Documentation
+## Useful Docs
 
-- **[📖 Full Documentation](https://mulliganfunding.github.io/aio-azure-clients-toolbox/)** - Complete guide with examples and API reference
-- **[🔧 Connection Pooling Deep Dive](https://mulliganfunding.github.io/aio-azure-clients-toolbox/connection-pooling/)** - Technical details with diagrams
-- **[⚡ Quick Start Guide](https://mulliganfunding.github.io/aio-azure-clients-toolbox/installation/)** - Get up and running in minutes
+- **[📖 Full Docs](https://mulliganfunding.github.io/aio-azure-clients-toolbox/)** - Complete guide with examples and API reference.
+- **[Quick Start Guide](https://mulliganfunding.github.io/aio-azure-clients-toolbox/installation/)**
+- **[Connection Pooling Deep Dive](https://mulliganfunding.github.io/aio-azure-clients-toolbox/connection-pooling/)** - Technical details with diagrams.
 
-## 🏆 Performance Comparison
-
-| Metric | Direct Azure SDK | Connection Pooling | Improvement |
-|--------|------------------|-------------------|-------------|
-| **Connection Time** | 100-500ms per operation | 1-5ms after warmup | **20-100x faster** |
-| **Memory Usage** | High (new client per op) | Low (shared connections) | **5-10x reduction** |
-| **Concurrency** | Limited by connection overhead | Up to `client_limit × pool_size` | **10-50x higher** |
-
-## 📦 Installation
+## Installation
 
 ```bash
 pip install aio-azure-clients-toolbox
 ```
 
-## ⚡ Quick Start
+## Quick Start
 
 ```python
 from azure.identity.aio import DefaultAzureCredential
@@ -63,7 +56,7 @@ async with cosmos_client.get_container_client() as container:
     await container.create_item({"id": "1"})  # 2ms after pool warmup
 ```
 
-## 🎯 Supported Azure Services
+## Supported Azure Services
 
 | Service | Managed Client | Features |
 |---------|----------------|----------|
@@ -73,18 +66,10 @@ async with cosmos_client.get_container_client() as container:
 | **Blob Storage** | `AzureBlobStorageClient` | File operations with SAS token support |
 | **Event Grid** | `EventGridClient` | Event publishing to multiple topics |
 
-## 🏗️ Core Innovation
 
-The library's core innovation is the `SharedTransportConnection` pattern that enables multiple Azure SDK clients to safely share persistent connections:
+## Testing Support
 
-- **Semaphore-based limiting**: Controls concurrent operations per connection
-- **Heap-optimized selection**: O(log n) optimal connection selection
-- **Automatic lifecycle management**: Handles expiration and renewal
-- **Lock-free design**: Minimizes contention in high-concurrency scenarios
-
-## 🧪 Testing Support
-
-Built-in pytest fixtures for easy testing:
+Also includes, built-in pytest fixtures for easy testing:
 
 ```python
 # tests/conftest.py
@@ -99,11 +84,6 @@ async def test_cosmos_operations(cosmos_insertable, document):
     result = await cosmos_client.insert_doc(document)
     assert result == "success"
 ```
-
-## Links
-
-- **Documentation**: [https://mulliganfunding.github.io/aio-azure-clients-toolbox/](https://mulliganfunding.github.io/aio-azure-clients-toolbox/)
-- **Repository**: [GitHub Repository](https://github.com/MulliganFunding/aio-azure-clients-toolbox)
 
 ---
 
