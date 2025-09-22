@@ -1,5 +1,7 @@
 # AIO Azure Clients Toolbox
 
+
+[![Tests](https://github.com/MulliganFunding/aio-azure-clients-toolbox/workflows/Tests/badge.svg)](https://github.com/MulliganFunding/aio-azure-clients-toolbox/actions)
 [![PyPI version](https://badge.fury.io/py/aio-azure-clients-toolbox.svg)](https://badge.fury.io/py/aio-azure-clients-toolbox)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Documentation](https://img.shields.io/badge/docs-github--pages-blue.svg)](https://mulliganfunding.github.io/aio-azure-clients-toolbox/)
