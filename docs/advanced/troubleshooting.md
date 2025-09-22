@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Common issues and solutions when using aio-azure-clients-toolbox.
+Common issues and solutions when using `aio-azure-clients-toolbox`.
 
 ## Connection Pool Issues
 
@@ -242,37 +242,6 @@ print(f"SAS URL: {sas_url}")
 
 ### Service Bus
 
-#### Message Processing Issues
-
-**Symptom**: Messages not being processed or going to dead letter queue
-
-**Solutions**:
-
-```python
-# Proper message handling
-async def process_messages_safely(receiver):
-    async with receiver:
-        async for message in receiver:
-            try:
-                # Process message
-                await handle_message(str(message))
-
-                # Complete on success
-                await receiver.complete_message(message)
-
-            except TemporaryError:
-                # Abandon for retry
-                await receiver.abandon_message(message)
-
-            except PermanentError as e:
-                # Dead letter for manual review
-                await receiver.dead_letter_message(
-                    message,
-                    reason="Processing failed",
-                    error_description=str(e)
-                )
-```
-
 #### Connection String vs Managed Identity
 
 **Symptom**: Authentication issues with Service Bus
@@ -290,56 +259,6 @@ service_bus = ManagedAzureServiceBusSender(
 # For connection strings, use Azure SDK directly:
 # from azure.servicebus.aio import ServiceBusClient
 # client = ServiceBusClient.from_connection_string(connection_string)
-```
-
-### Event Hub
-
-#### Partition Key Distribution
-
-**Symptom**: Uneven load across partitions
-
-**Solutions**:
-
-```python
-# Use meaningful partition keys for even distribution
-import hashlib
-
-def get_partition_key(user_id: str) -> str:
-    # Hash user ID to distribute evenly
-    return str(hash(user_id) % 10)
-
-# Send with partition key
-await eventhub_producer.send_event(
-    json.dumps(event_data),
-    partition_key=get_partition_key(event_data["user_id"])
-)
-```
-
-#### Event Size Limits
-
-**Symptom**: Events rejected due to size
-
-**Solutions**:
-
-```python
-# Check event size before sending
-import json
-
-def check_event_size(event_data: dict, max_size: int = 1024 * 1024) -> bool:
-    """Check if event is under size limit (1MB default)."""
-    serialized = json.dumps(event_data)
-    return len(serialized.encode('utf-8')) <= max_size
-
-# Split large events
-if not check_event_size(large_event):
-    # Split into smaller events or reference external storage
-    event_ref = await upload_to_blob_storage(large_event)
-    small_event = {
-        "type": "large_event_reference",
-        "reference": event_ref,
-        "summary": extract_summary(large_event)
-    }
-    await eventhub_producer.send_event(json.dumps(small_event))
 ```
 
 ## Performance Issues
@@ -400,61 +319,7 @@ async def warm_up_pool(client, operations=10):
     await asyncio.gather(*[dummy_operation() for _ in range(operations)])
 ```
 
-### Memory Leaks
-
-**Symptoms**: Gradually increasing memory usage
-
-**Diagnosis**:
-
-```python
-import gc
-import tracemalloc
-
-# Enable memory tracing
-tracemalloc.start()
-
-# Take memory snapshots
-def take_memory_snapshot():
-    snapshot = tracemalloc.take_snapshot()
-    top_stats = snapshot.statistics('lineno')
-
-    print("Top 10 memory allocations:")
-    for stat in top_stats[:10]:
-        print(stat)
-
-# Monitor over time
-async def monitor_memory():
-    while True:
-        take_memory_snapshot()
-        gc.collect()  # Force garbage collection
-        await asyncio.sleep(60)  # Check every minute
-```
-
-**Solutions**:
-
-```python
-# Ensure proper cleanup
-class ManagedAzureService:
-    def __init__(self):
-        self.clients = []
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # Cleanup all clients
-        for client in self.clients:
-            await client.close()
-        self.clients.clear()
-
-# Use context managers consistently
-async with ManagedAzureService() as service:
-    # Use service
-    pass
-# Automatic cleanup here
-```
-
-## Debugging Tips
+## Debugging
 
 ### Enable Debug Logging
 
@@ -531,45 +396,4 @@ def validate_azure_config():
 
 # Run validation
 validate_azure_config()
-```
-
-## Getting Help
-
-### Collect Diagnostic Information
-
-When reporting issues, include:
-
-1. **Library version**: `pip show aio-azure-clients-toolbox`
-2. **Python version**: `python --version`
-3. **Azure SDK versions**: `pip list | grep azure`
-4. **Configuration**: Pool settings and client parameters
-5. **Error messages**: Full stack traces
-6. **Code samples**: Minimal reproducible example
-
-### Enable Request/Response Logging
-
-```python
-import logging
-
-# Log HTTP requests/responses
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.DEBUG)
-
-# This will show:
-# - Request URLs and headers
-# - Response status codes and headers
-# - Request/response bodies (be careful with sensitive data)
-```
-
-### Common Environment Issues
-
-```bash
-# Check Azure CLI login
-az account show
-
-# Test credential access
-az ad signed-in-user show
-
-# Verify resource access
-az cosmosdb show --name your-cosmos --resource-group your-rg
-az storage account show --name yourstorage --resource-group your-rg
 ```
