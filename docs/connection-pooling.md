@@ -1,6 +1,6 @@
 # Connection Pooling
 
-The primary contribution of this library is its connection-pooling system that reduces the time required to *estalblish connections* through shared, persistent connections.
+The primary contribution of this library is its connection-pooling system that reduces the time required to *establish connections* through shared, persistent connections.
 
 ## Problem Statement
 

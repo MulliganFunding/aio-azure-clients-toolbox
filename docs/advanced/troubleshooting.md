@@ -9,6 +9,7 @@ Common issues and solutions when using `aio-azure-clients-toolbox`.
 **Symptom**: `ConnectionsExhausted: No connections available`
 
 **Causes**:
+
 - Pool size too small for concurrent load
 - Client limit per connection too low
 - Connections not being properly released
@@ -35,6 +36,7 @@ async with client.get_container_client() as container:
 **Symptom**: Operations timing out or hanging
 
 **Causes**:
+
 - Idle timeout too short
 - Network connectivity issues
 - Azure service throttling
@@ -59,6 +61,7 @@ logging.getLogger("aio_azure_clients_toolbox.connection_pooling").setLevel(loggi
 **Symptom**: High memory consumption with pooled clients
 
 **Causes**:
+
 - Too many connections in pool
 - Large idle timeouts
 - Connection leaks
@@ -85,6 +88,7 @@ print(f"Ready connections: {client.pool.ready_connection_count}")
 **Symptom**: Authentication errors or permission denied
 
 **Causes**:
+
 - Missing environment variables
 - Insufficient permissions
 - Managed identity not configured
@@ -102,6 +106,7 @@ az login
 ```
 
 **Check permissions**:
+
 - Cosmos DB: "Cosmos DB Account Contributor" or "Cosmos DB Data Contributor"
 - Blob Storage: "Storage Blob Data Contributor"
 - Service Bus: "Azure Service Bus Data Sender/Receiver"
@@ -113,6 +118,7 @@ az login
 **Symptom**: Intermittent authentication failures
 
 **Causes**:
+
 - Long-running processes with expired tokens
 - Credential caching issues
 

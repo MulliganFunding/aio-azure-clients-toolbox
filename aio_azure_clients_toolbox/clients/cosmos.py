@@ -253,7 +253,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
     Applications can subclass this class to interact with their container
 
     Args:
-      endpont:
+      endpoint:
         A string URL of the Cosmos server.
       dbname:
         Cosmos database name.

@@ -8,7 +8,7 @@ Following the async Python examples from the Azure SDK for services such as `Eve
 
 !!! warning "Typical connection costs"
 
-    In our traces, we found that **creating** a connection in order to publish to `Eventhub` `ServiceBus` and adds **700ms-900** ms to each request! But that *actually publishing* messages takes **microseconds**. When we asked Azure about this directly, they told us these latencies were not improvable, and exist all across all language SDKs.
+    In our traces, we found that **creating** a connection in order to publish to `Eventhub` or `ServiceBus` adds **700ms-900** ms to each request! On the other hand, *actually publishing* messages typically takes **microseconds**. When we asked Azure about this directly, they told us these latencies were not improvable, and exist all across all language SDKs.
 
 !!! info "Connection-pooling benefits"
     This library eliminates the typical connection overhead through persistent connections in a connection pool. This amortizes that initial connection cost over subsequent requests.
@@ -48,15 +48,15 @@ This library's `SharedTransportConnection` pattern allows multiple Azure SDK cli
 
 ## Supported Azure Services
 
-All clients have a basic wrappers and **some** offer "managed" (pooled) versions:
+All clients have basic wrappers but **some** offer "managed" (connection-pooled) versions. This table shows the basic and managed clients available:
 
-| Service | Basic Client | Managed Client | Key Features |
-|---------|--------------|----------------|--------------|
-| **Cosmos DB** | `Cosmos` | `ManagedCosmos` | Document operations with connection pooling |
-| **Event Hub** | `Eventhub` | `ManagedAzureEventhubProducer` | Event streaming with persistent connections |
-| **Service Bus** | `AzureServiceBus` | `ManagedAzureServiceBusSender` | Message queuing with connection management |
-| **Blob Storage** | `AzureBlobStorageClient` | N/A | File operations with SAS token support |
-| **Event Grid** | `EventGridClient` | N/A | Event publishing to multiple topics |
+| Service | Basic Client | Managed Client |
+|---------|--------------|----------------|
+| **Cosmos DB** | `Cosmos` | `ManagedCosmos` |
+| **Event Hub** | `Eventhub` | `ManagedAzureEventhubProducer` |
+| **Service Bus** | `AzureServiceBus` | `ManagedAzureServiceBusSender`
+| **Blob Storage** | `AzureBlobStorageClient` | N/A |
+| **Event Grid** | `EventGridClient` | N/A |
 
 ## Quick Start
 
