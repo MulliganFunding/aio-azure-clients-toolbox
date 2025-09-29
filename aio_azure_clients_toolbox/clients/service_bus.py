@@ -28,6 +28,24 @@ SERVICE_BUS_SEND_TTL_SECONDS = 200
 logger = logging.getLogger(__name__)
 
 
+class SendClientCloseWrapper:
+    """
+    Wrapper class for a ServiceBusSender which ensures that the sender is closed
+    after use.
+    """
+
+    def __init__(self, sender: ServiceBusSender, credential: DefaultAzureCredential):
+        self._sender = sender
+        self._credential = credential
+
+    def __getattr__(self, name: str):
+        return getattr(self._sender, name)
+
+    async def close(self):
+        await self._sender.close()
+        await self._credential.close()
+
+
 class AzureServiceBus:
     """
     Basic AzureServiceBus client without connection pooling.
@@ -74,7 +92,7 @@ class AzureServiceBus:
             return self._sender_client
 
         self._sender_client = self.client.get_queue_sender(queue_name=self.queue_name)
-        return self._sender_client
+        return SendClientCloseWrapper(self._sender_client, self.credential)
 
     async def close(self):
         try:

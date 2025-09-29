@@ -19,6 +19,26 @@ EVENTHUB_SEND_TTL_SECONDS = 220
 logger = logging.getLogger(__name__)
 
 
+class ProducerClientCloseWrapper:
+    """
+    Wrapper class for an EventHubProducerClient which ensures that the client is closed
+    after use.
+    """
+
+    def __init__(
+        self, client: EventHubProducerClient, credential: DefaultAzureCredential
+    ):
+        self._client = client
+        self._credential = credential
+
+    def __getattr__(self, name: str):
+        return getattr(self._client, name)
+
+    async def close(self):
+        await self._client.close()
+        await self._credential.close()
+
+
 class Eventhub:
     __slots__ = [
         "credential",
@@ -58,6 +78,9 @@ class Eventhub:
         if self._client is None:
             self._client = self.get_client()
         return self._client
+
+    def __getattr__(self, name: str):
+        return getattr(self.client, name)
 
     async def close(self):
         if self._client is not None:
@@ -211,7 +234,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             self.credential,
             eventhub_transport_type=self.eventhub_transport_type,
         )
-        return client.get_client()
+        return ProducerClientCloseWrapper(client.get_client(), self.credential)
 
     async def close(self):
         """Closes all connections in our pool"""

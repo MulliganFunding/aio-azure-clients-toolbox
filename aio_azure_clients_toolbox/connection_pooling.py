@@ -479,6 +479,7 @@ class ConnectionPool:
         total_time = 0
         # We'll loop through roughly half the pool to find a candidate
         # We add one in case it's zero.
+        now = time.monotonic()
         conn_check_n = (self.max_size // 2) + 1
         while not connection_reached and total_time < timeout:
             for _conn in heapq.nsmallest(conn_check_n, self._pool):
@@ -488,9 +489,10 @@ class ConnectionPool:
                             yield conn
                             connection_reached = True
                             break
-
+            # Arbitrary async yield to avoid busy loop
             await anyio.sleep(0.01)
-            total_time += 0.01
+            latest = time.monotonic()
+            total_time += latest - now
 
         if connection_reached:
             heapq.heapify(self._pool)
