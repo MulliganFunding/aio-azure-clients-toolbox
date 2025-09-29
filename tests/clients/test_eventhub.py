@@ -75,7 +75,9 @@ async def test_evhub_send_events_data_batch(ehub):
 
 
 async def test_managed_get_create(managed_ehub, mockehub):
-    assert await managed_ehub.create() == mockehub
+    close_producer = await managed_ehub.create()
+    assert close_producer is not None
+    assert close_producer._client is mockehub
 
 
 async def test_managed_close(managed_ehub):

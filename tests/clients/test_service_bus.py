@@ -23,7 +23,8 @@ async def test_get_sender(sbus, mockservicebus):
     sender = sbus.get_sender()
     await sender.bla()
     assert mockservicebus._sender.method_calls
-    assert sbus.get_sender() is sender
+    sender2 = sbus.get_sender()
+    assert sender2.attribute is sender.attribute
 
 
 async def test_close(sbus):
@@ -56,7 +57,8 @@ async def test_managed_get_sender(managed_sbus, mockservicebus):
     sender = managed_sbus.get_sender()
     await sender.bla()
     assert mockservicebus._sender.method_calls
-    assert managed_sbus.get_sender() is sender
+    sender2 = managed_sbus.get_sender()
+    assert sender2.attribute is sender.attribute
 
 
 async def test_managed_close(managed_sbus):

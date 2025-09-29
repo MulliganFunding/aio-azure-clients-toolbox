@@ -247,5 +247,7 @@ async def test_connection_pool_close(pool):
 async def test_pool_acquire_timeouts(slow_pool):
     """Check that acquire with timeout moves on sucessfully"""
     with pytest.raises(cp.ConnectionsExhausted):
-        async with slow_pool.get(timeout=SLOW_CONN_SLEEPINESS) as conn:
+        async with slow_pool.get(
+            timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS
+        ) as conn:
             assert conn is None
