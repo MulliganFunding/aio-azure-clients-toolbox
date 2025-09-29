@@ -87,7 +87,7 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    def get_sender(self) -> ServiceBusSender:
+    def get_sender(self) -> SendClientCloseWrapper:
         if self._sender_client is not None:
             return self._sender_client
 
@@ -175,7 +175,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             "acquire_timeout": pool_connection_create_timeout,
         }
 
-    def get_sender(self) -> ServiceBusSender:
+    def get_sender(self) -> SendClientCloseWrapper:
         client = AzureServiceBus(
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
@@ -183,7 +183,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         )
         return client.get_sender()
 
-    async def create(self) -> ServiceBusSender:
+    async def create(self) -> SendClientCloseWrapper:
         """Creates a new connection for our pool"""
         return self.get_sender()
 
@@ -208,7 +208,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             logger.warning(f"Credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
-    async def ready(self, conn: ServiceBusSender) -> bool:
+    async def ready(self, conn: SendClientCloseWrapper) -> bool:
         """Establishes readiness for a new connection"""
         message = ServiceBusMessage(self.ready_message)
         now = datetime.datetime.now(tz=datetime.UTC)

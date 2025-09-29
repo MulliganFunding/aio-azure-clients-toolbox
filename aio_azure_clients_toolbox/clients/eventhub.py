@@ -233,7 +233,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             "acquire_timeout": pool_connection_create_timeout,
         }
 
-    async def create(self):
+    async def create(self) -> ProducerClientCloseWrapper:
         """Creates a new connection for our pool"""
         client = Eventhub(
             self.eventhub_namespace,
