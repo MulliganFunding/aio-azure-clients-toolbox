@@ -63,6 +63,10 @@ class Eventhub:
         if self._client is not None:
             await self._client.close()
             self._client = None
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.exception(f"Eventhub credential close failed with {exc}")
 
     async def send_event_data(
         self,
@@ -211,8 +215,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         try:
             await self.credential.close()
         except Exception as exc:
-            logger.exception(f"Credential close failed with {exc}")
-
+            logger.warning(f"Eventhub credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "Eventhub.ready")
     async def ready(self, conn: EventHubProducerClient) -> bool:

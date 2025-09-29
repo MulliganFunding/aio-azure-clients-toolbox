@@ -117,7 +117,7 @@ class ConnectionManager:
         try:
             await self.credential.close()
         except Exception as exc:
-            logger.warning("Error closing credential: %s", exc)
+            logger.warning("Error closing Cosmos credential: %s", exc)
 
         self._client = None
         self._database = None

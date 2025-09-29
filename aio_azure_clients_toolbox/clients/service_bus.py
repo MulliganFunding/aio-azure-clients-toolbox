@@ -77,6 +77,11 @@ class AzureServiceBus:
         return self._sender_client
 
     async def close(self):
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.warning(f"ServiceBus credential close failed with {exc}")
+
         if self._receiver_client is not None:
             await self._receiver_client.close()
             self._receiver_client = None
