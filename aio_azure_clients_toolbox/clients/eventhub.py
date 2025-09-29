@@ -195,7 +195,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       max_lifespan_seconds:
         Optional setting which controls how long a connection lives before recycling.
       pool_connection_create_timeout:
-        Timeout for acquiring a connection from the pool (default: 10 seconds).
+        Timeout for creating a connection in the pool (default: 10 seconds).
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
       ready_message:
