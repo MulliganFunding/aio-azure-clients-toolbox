@@ -118,6 +118,8 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         Connection pool size (default: 10).
       max_idle_seconds:
         Maximum duration allowed for an idle connection before recylcing it.
+      max_lifespan_seconds:
+        Optional setting which controls how long a connection lives before recycling.
       ready_message:
         A string representing the first "ready" message sent to establish connection.
     """
@@ -130,6 +132,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
+        max_lifespan_seconds: int | None = None,
         ready_message: str = "Connection established",
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
@@ -140,6 +143,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             client_limit=client_limit,
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
+            max_lifespan_seconds=max_lifespan_seconds,
         )
         self.ready_message = ready_message
 

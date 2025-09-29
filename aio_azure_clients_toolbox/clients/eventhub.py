@@ -171,7 +171,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       max_size:
         Connection pool size (default: 10).
       max_idle_seconds:
-        Maximum duration allowed for an idle connection before recylcing it.
+        Maximum duration allowed for an idle connection before recycling it.
+      max_lifespan_seconds:
+        Optional setting which controls how long a connection lives before recycling.
       ready_message:
         A string representing the first "ready" message sent to establish connection.
     """
@@ -186,6 +188,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = EVENTHUB_SEND_TTL_SECONDS,
         ready_message: str = "Connection established",
+        max_lifespan_seconds: int | None = None,
     ):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
@@ -196,6 +199,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             client_limit=client_limit,
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
+            max_lifespan_seconds=max_lifespan_seconds,
         )
         self.ready_message = ready_message
 
