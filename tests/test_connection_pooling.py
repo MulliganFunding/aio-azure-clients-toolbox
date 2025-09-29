@@ -251,3 +251,73 @@ async def test_pool_acquire_timeouts(slow_pool):
             timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS
         ) as conn:
             assert conn is None
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> send_time_deco tests <--**---
+# # # # # # # # # # # # # # # # # #
+
+
+async def test_send_time_deco_basic():
+    """Test that send_time_deco wraps a function and returns the correct result"""
+
+    @cp.send_time_deco()
+    async def test_func(value):
+        await sleep(0.01)  # Small delay to ensure some timing is recorded
+        return value * 2
+
+    result = await test_func(5)
+    assert result == 10
+
+
+async def test_send_time_deco_with_custom_message(caplog):
+    """Test send_time_deco with custom message logs timing information"""
+    import logging
+
+    # Set up logging to capture debug messages
+    caplog.set_level(
+        logging.DEBUG, logger="aio_azure_clients_toolbox.connection_pooling"
+    )
+
+    @cp.send_time_deco(msg="Test operation")
+    async def test_func():
+        await sleep(0.01)
+        return "done"
+
+    result = await test_func()
+    assert result == "done"
+
+    # Check that timing message was logged
+    debug_messages = [
+        record.message for record in caplog.records if record.levelname == "DEBUG"
+    ]
+    assert any(
+        "Test operation timing:" in msg and "ns" in msg for msg in debug_messages
+    )
+
+
+async def test_send_time_deco_with_custom_logger(caplog):
+    """Test send_time_deco with custom logger"""
+    import logging
+
+    # Create a custom logger
+    custom_logger = logging.getLogger("test_custom_logger")
+    caplog.set_level(logging.DEBUG, logger="test_custom_logger")
+
+    @cp.send_time_deco(log=custom_logger, msg="Custom logger test")
+    async def test_func():
+        await sleep(0.01)
+        return "custom_result"
+
+    result = await test_func()
+    assert result == "custom_result"
+
+    # Check that timing message was logged to the custom logger
+    debug_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelname == "DEBUG" and record.name == "test_custom_logger"
+    ]
+    assert any(
+        "Custom logger test timing:" in msg and "ns" in msg for msg in debug_messages
+    )
