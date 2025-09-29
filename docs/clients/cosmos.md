@@ -25,7 +25,9 @@ ManagedCosmos(
     client_limit: int = 100,
     max_size: int = 10,
     max_idle_seconds: int = 30,
-    max_lifespan_seconds: int = 60
+    max_lifespan_seconds: int = 60,
+    pool_connection_create_timeout: int = 10,
+    pool_get_timeout: int = 60
 )
 ```
 
@@ -39,6 +41,8 @@ ManagedCosmos(
 - **max_size**: Connection pool size (default: 10)
 - **max_idle_seconds**: Connection idle timeout (default: 30)
 - **max_lifespan_seconds**: Maximum connection lifetime (default: 60)
+- **pool_connection_create_timeout**: Timeout for creating connections in the pool (default: 10 seconds)
+- **pool_get_timeout**: Timeout for acquiring connections from the pool (default: 60 seconds)
 
 ### Usage Example
 

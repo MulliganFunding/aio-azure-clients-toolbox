@@ -25,7 +25,9 @@ ManagedAzureEventhubProducer(
     max_size: int = 10,
     max_idle_seconds: int = 300,
     max_lifespan_seconds: int = None,
-    ready_message: str = None
+    ready_message: str = None,
+    pool_connection_create_timeout: int = 10,
+    pool_get_timeout: int = 60
 )
 ```
 
@@ -40,6 +42,8 @@ ManagedAzureEventhubProducer(
 - **max_idle_seconds**: Connection idle timeout
 - **max_lifespan_seconds**: Maximum connection lifetime
 - **ready_message**: Message sent to validate connection readiness
+- **pool_connection_create_timeout**: Timeout for creating connections in the pool (default: 10 seconds)
+- **pool_get_timeout**: Timeout for acquiring connections from the pool (default: 60 seconds)
 
 ### Methods
 

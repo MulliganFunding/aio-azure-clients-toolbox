@@ -23,7 +23,9 @@ ManagedAzureServiceBusSender(
     client_limit: int = 100,
     max_size: int = 10,
     max_idle_seconds: int = 300,
-    max_lifespan_seconds: int = None
+    max_lifespan_seconds: int = None,
+    pool_connection_create_timeout: int = 10,
+    pool_get_timeout: int = 60
 )
 ```
 
@@ -36,6 +38,8 @@ ManagedAzureServiceBusSender(
 - **max_size**: Connection pool size
 - **max_idle_seconds**: Connection idle timeout
 - **max_lifespan_seconds**: Maximum connection lifetime
+- **pool_connection_create_timeout**: Timeout for creating connections in the pool (default: 10 seconds)
+- **pool_get_timeout**: Timeout for acquiring connections from the pool (default: 60 seconds)
 
 ### Methods
 
