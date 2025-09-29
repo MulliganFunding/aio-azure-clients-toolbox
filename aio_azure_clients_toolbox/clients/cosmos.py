@@ -269,6 +269,10 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         Maximum duration allowed for an idle connection before recylcing it.
       max_lifespan_seconds:
         Optional setting which controls how long a connection live before recycling.
+      pool_connection_create_timeout:
+        Timeout for acquiring a connection from the pool (default: 10 seconds).
+      pool_get_timeout:
+        Timeout for getting a connection from the pool (default: 60 seconds).
     """
 
     MatchConditions = MatchConditions
@@ -283,6 +287,8 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = CLIENT_IDLE_SECONDS_DEFAULT,
         max_lifespan_seconds: int = CLIENT_TTL_SECONDS_DEFAULT,
+        pool_connection_create_timeout: int = 10,
+        pool_get_timeout: int = 60,
     ):
         self.endpoint = endpoint
         self.dbname = dbname
@@ -296,6 +302,10 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
         )
+        self.pool_kwargs = {
+            "timeout": pool_get_timeout,
+            "acquire_timeout": pool_connection_create_timeout,
+        }
 
     async def create(self):
         """Creates a new connection for our pool"""
@@ -342,7 +352,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         Because making connections is expensive, we'd like to preserve them
         for a while.
         """
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             try:
                 yield conn
             except RuntimeError as e:

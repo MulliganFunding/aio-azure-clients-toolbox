@@ -138,6 +138,10 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         Maximum duration allowed for an idle connection before recylcing it.
       max_lifespan_seconds:
         Optional setting which controls how long a connection lives before recycling.
+      pool_connection_create_timeout:
+        Timeout for acquiring a connection from the pool (default: 10 seconds).
+      pool_get_timeout:
+        Timeout for getting a connection from the pool (default: 60 seconds).
       ready_message:
         A string representing the first "ready" message sent to establish connection.
     """
@@ -152,6 +156,8 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
         max_lifespan_seconds: int | None = None,
         ready_message: str = "Connection established",
+        pool_connection_create_timeout: int = 10,
+        pool_get_timeout: int = 60,
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
@@ -164,6 +170,10 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             max_lifespan_seconds=max_lifespan_seconds,
         )
         self.ready_message = ready_message
+        self.pool_kwargs = {
+            "timeout": pool_get_timeout,
+            "acquire_timeout": pool_connection_create_timeout,
+        }
 
     def get_sender(self) -> ServiceBusSender:
         client = AzureServiceBus(
@@ -228,7 +238,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         message = ServiceBusMessage(msg)
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             try:
                 await conn.schedule_messages(message, scheduled_time_utc)
             except (

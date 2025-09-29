@@ -464,7 +464,8 @@ class ConnectionPool:
     @asynccontextmanager
     async def get(
         self,
-        timeout=10.0,
+        timeout: int = 60.0,
+        acquire_timeout: int = 10.0,
     ) -> AsyncGenerator[AbstractConnection, None]:
         """
         Pull out an idle connection.
@@ -484,7 +485,7 @@ class ConnectionPool:
         while not connection_reached and total_time < timeout:
             for _conn in heapq.nsmallest(conn_check_n, self._pool):
                 if _conn.available:
-                    async with _conn.acquire(timeout=timeout) as conn:
+                    async with _conn.acquire(timeout=acquire_timeout) as conn:
                         if conn is not None:
                             yield conn
                             connection_reached = True
