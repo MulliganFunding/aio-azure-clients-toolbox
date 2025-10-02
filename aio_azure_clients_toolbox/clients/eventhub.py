@@ -19,6 +19,26 @@ EVENTHUB_SEND_TTL_SECONDS = 220
 logger = logging.getLogger(__name__)
 
 
+class ProducerClientCloseWrapper:
+    """
+    Wrapper class for an EventHubProducerClient which ensures that the client is closed
+    after use.
+    """
+
+    def __init__(
+        self, client: EventHubProducerClient, credential: DefaultAzureCredential
+    ):
+        self._client = client
+        self._credential = credential
+
+    def __getattr__(self, name: str):
+        return getattr(self._client, name)
+
+    async def close(self):
+        await self._client.close()
+        await self._credential.close()
+
+
 class Eventhub:
     __slots__ = [
         "credential",
@@ -63,6 +83,10 @@ class Eventhub:
         if self._client is not None:
             await self._client.close()
             self._client = None
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.exception(f"Eventhub credential close failed with {exc}")
 
     async def send_event_data(
         self,
@@ -167,7 +191,13 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       max_size:
         Connection pool size (default: 10).
       max_idle_seconds:
-        Maximum duration allowed for an idle connection before recylcing it.
+        Maximum duration allowed for an idle connection before recycling it.
+      max_lifespan_seconds:
+        Optional setting which controls how long a connection lives before recycling.
+      pool_connection_create_timeout:
+        Timeout for creating a connection in the pool (default: 10 seconds).
+      pool_get_timeout:
+        Timeout for getting a connection from the pool (default: 60 seconds).
       ready_message:
         A string representing the first "ready" message sent to establish connection.
     """
@@ -182,6 +212,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = EVENTHUB_SEND_TTL_SECONDS,
         ready_message: str = "Connection established",
+        max_lifespan_seconds: int | None = None,
+        pool_connection_create_timeout: int = 10,
+        pool_get_timeout: int = 60,
     ):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
@@ -192,10 +225,15 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             client_limit=client_limit,
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
+            max_lifespan_seconds=max_lifespan_seconds,
         )
         self.ready_message = ready_message
+        self.pool_kwargs = {
+            "timeout": pool_get_timeout,
+            "acquire_timeout": pool_connection_create_timeout,
+        }
 
-    async def create(self):
+    async def create(self) -> ProducerClientCloseWrapper:
         """Creates a new connection for our pool"""
         client = Eventhub(
             self.eventhub_namespace,
@@ -203,7 +241,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             self.credential,
             eventhub_transport_type=self.eventhub_transport_type,
         )
-        return client.get_client()
+        return ProducerClientCloseWrapper(client.get_client(), self.credential)
 
     async def close(self):
         """Closes all connections in our pool"""
@@ -211,17 +249,17 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         try:
             await self.credential.close()
         except Exception as exc:
-            logger.exception(f"Credential close failed with {exc}")
-
+            logger.warning(f"Eventhub credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "Eventhub.ready")
-    async def ready(self, conn: EventHubProducerClient) -> bool:
+    async def ready(self, conn: ProducerClientCloseWrapper) -> bool:
         """Establishes readiness for a new connection"""
         # Create a batch.
         event_data_batch: EventDataBatch = await conn.create_batch()
         # Prepare ready message as an event
         event_data_batch.add(EventData(self.ready_message))
         attempts = 2
+
         while attempts > 0:
             try:
                 # Send the batch of events to the event hub.
@@ -254,7 +292,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         For instance, if you use a Salesforce record identifier as the `partition_key`
         then you can ensure that a _particular consumer_ always receives _those_ events.
         """
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             # Create a batch.
             event_data_batch: EventDataBatch = await conn.create_batch(partition_key=partition_key)
 
@@ -289,7 +327,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         For instance, if you use a Salesforce record identifier as the `partition_key`
         then you can ensure that a _particular consumer_ always receives _those_ events.
         """
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             # Create a batch.
             event_data_batch: EventDataBatch = await conn.create_batch(partition_key=partition_key)
 
@@ -324,7 +362,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         For instance, if you use a Salesforce record identifier as the `partition_key`
         then you can ensure that a _particular consumer_ always receives _those_ events.
         """
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             # Create a batch.
             event_data_batch: EventDataBatch = await conn.create_batch(partition_key=partition_key)
 
@@ -351,7 +389,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         """
         Sending events in a batch is more performant than sending individual events.
         """
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
             try:

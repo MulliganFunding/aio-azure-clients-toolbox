@@ -28,6 +28,24 @@ SERVICE_BUS_SEND_TTL_SECONDS = 200
 logger = logging.getLogger(__name__)
 
 
+class SendClientCloseWrapper:
+    """
+    Wrapper class for a ServiceBusSender which ensures that the sender is closed
+    after use.
+    """
+
+    def __init__(self, sender: ServiceBusSender, credential: DefaultAzureCredential):
+        self._sender = sender
+        self._credential = credential
+
+    def __getattr__(self, name: str):
+        return getattr(self._sender, name)
+
+    async def close(self):
+        await self._sender.close()
+        await self._credential.close()
+
+
 class AzureServiceBus:
     """
     Basic AzureServiceBus client without connection pooling.
@@ -69,14 +87,19 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    def get_sender(self) -> ServiceBusSender:
+    def get_sender(self) -> SendClientCloseWrapper:
         if self._sender_client is not None:
             return self._sender_client
 
         self._sender_client = self.client.get_queue_sender(queue_name=self.queue_name)
-        return self._sender_client
+        return SendClientCloseWrapper(self._sender_client, self.credential)
 
     async def close(self):
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.warning(f"ServiceBus credential close failed with {exc}")
+
         if self._receiver_client is not None:
             await self._receiver_client.close()
             self._receiver_client = None
@@ -113,6 +136,12 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         Connection pool size (default: 10).
       max_idle_seconds:
         Maximum duration allowed for an idle connection before recylcing it.
+      max_lifespan_seconds:
+        Optional setting which controls how long a connection lives before recycling.
+      pool_connection_create_timeout:
+       Timeout for creating a connection in the pool (default: 10 seconds).
+      pool_get_timeout:
+        Timeout for getting a connection from the pool (default: 60 seconds).
       ready_message:
         A string representing the first "ready" message sent to establish connection.
     """
@@ -125,7 +154,10 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
+        max_lifespan_seconds: int | None = None,
         ready_message: str = "Connection established",
+        pool_connection_create_timeout: int = 10,
+        pool_get_timeout: int = 60,
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
@@ -135,10 +167,15 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             client_limit=client_limit,
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
+            max_lifespan_seconds=max_lifespan_seconds,
         )
         self.ready_message = ready_message
+        self.pool_kwargs = {
+            "timeout": pool_get_timeout,
+            "acquire_timeout": pool_connection_create_timeout,
+        }
 
-    def get_sender(self) -> ServiceBusSender:
+    def get_sender(self) -> SendClientCloseWrapper:
         client = AzureServiceBus(
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
@@ -146,7 +183,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         )
         return client.get_sender()
 
-    async def create(self) -> ServiceBusSender:
+    async def create(self) -> SendClientCloseWrapper:
         """Creates a new connection for our pool"""
         return self.get_sender()
 
@@ -171,7 +208,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             logger.warning(f"Credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
-    async def ready(self, conn: ServiceBusSender) -> bool:
+    async def ready(self, conn: SendClientCloseWrapper) -> bool:
         """Establishes readiness for a new connection"""
         message = ServiceBusMessage(self.ready_message)
         now = datetime.datetime.now(tz=datetime.UTC)
@@ -201,7 +238,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         message = ServiceBusMessage(msg)
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
-        async with self.pool.get() as conn:
+        async with self.pool.get(**self.pool_kwargs) as conn:
             try:
                 await conn.schedule_messages(message, scheduled_time_utc)
             except (

@@ -299,6 +299,8 @@ Default Configuration = 10 × 100 = 1,000 concurrent operations
 | `max_size` | 10 | Number of connections in pool | 2-5 (small), 5-15 (medium), 15-50 (large apps) |
 | `max_idle_seconds` | 300 | Idle timeout before recycling | 60-300 (frequent), 600-1800 (infrequent) |
 | `max_lifespan_seconds` | None | Maximum connection lifetime | 1800-7200 (recommended) |
+| `pool_connection_create_timeout` | 10 | Timeout for creating pool connections | 5-30 seconds based on network latency |
+| `pool_get_timeout` | 60 | Timeout for acquiring pool connections | 30-120 seconds based on load patterns |
 
 ### Configuration Examples
 
@@ -317,7 +319,9 @@ client = ManagedCosmos(
     client_limit=200,        # More concurrent clients
     max_size=20,             # Larger pool
     max_idle_seconds=600,    # Longer retention
-    max_lifespan_seconds=7200  # 2-hour rotation
+    max_lifespan_seconds=7200,  # 2-hour rotation
+    pool_connection_create_timeout=30,  # Allow more time for creation
+    pool_get_timeout=120     # Extended acquisition timeout
 )
 
 # Low-latency configuration
@@ -326,7 +330,9 @@ client = ManagedCosmos(
     client_limit=50,         # Reduced contention
     max_size=5,              # Smaller pool
     max_idle_seconds=60,     # Quick recycling
-    max_lifespan_seconds=1800  # 30-minute rotation
+    max_lifespan_seconds=1800,  # 30-minute rotation
+    pool_connection_create_timeout=5,   # Fast creation timeout
+    pool_get_timeout=30      # Quick acquisition timeout
 )
 
 # Memory-optimized configuration
@@ -335,7 +341,9 @@ client = ManagedCosmos(
     client_limit=25,         # Conservative limit
     max_size=3,              # Minimal pool
     max_idle_seconds=30,     # Aggressive recycling
-    max_lifespan_seconds=600   # 10-minute rotation
+    max_lifespan_seconds=600,   # 10-minute rotation
+    pool_connection_create_timeout=10,  # Default creation timeout
+    pool_get_timeout=60      # Default acquisition timeout
 )
 ```
 
