@@ -4,7 +4,7 @@ service_bus.py
 Wrapper class around a `ServiceBusClient` which allows sending messages or
 subscribing to a queue.
 """
-
+import copy
 import datetime
 import logging
 import traceback
@@ -36,7 +36,7 @@ class SendClientCloseWrapper:
 
     def __init__(self, sender: ServiceBusSender, credential: DefaultAzureCredential):
         self._sender = sender
-        self._credential = credential
+        self._credential = copy.deepcopy(credential)
 
     def __getattr__(self, name: str):
         return getattr(self._sender, name)
@@ -95,11 +95,6 @@ class AzureServiceBus:
         return SendClientCloseWrapper(self._sender_client, self.credential)
 
     async def close(self):
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning(f"ServiceBus credential close failed with {exc}")
-
         if self._receiver_client is not None:
             await self._receiver_client.close()
             self._receiver_client = None

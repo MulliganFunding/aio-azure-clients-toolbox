@@ -1,3 +1,4 @@
+import copy
 import logging
 import traceback
 
@@ -29,7 +30,7 @@ class ProducerClientCloseWrapper:
         self, client: EventHubProducerClient, credential: DefaultAzureCredential
     ):
         self._client = client
-        self._credential = credential
+        self._credential = copy.deepcopy(credential)
 
     def __getattr__(self, name: str):
         return getattr(self._client, name)
