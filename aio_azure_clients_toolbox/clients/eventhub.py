@@ -22,26 +22,6 @@ EVENTHUB_SEND_TTL_SECONDS = 220
 logger = logging.getLogger(__name__)
 
 
-class ProducerClientCloseWrapper:
-    """
-    Wrapper class for an EventHubProducerClient which ensures that the client is closed
-    after use.
-    """
-
-    def __init__(
-        self, client: EventHubProducerClient, credential: DefaultAzureCredential
-    ):
-        self._client = client
-        self._credential = credential
-
-    def __getattr__(self, name: str):
-        return getattr(self._client, name)
-
-    async def close(self):
-        await self._client.close()
-        await self._credential.close()
-
-
 class Eventhub:
     __slots__ = [
         "credential",
@@ -67,6 +47,9 @@ class Eventhub:
             else {"transport_type": TransportType.AmqpOverWebsocket}
         )
         self._client: EventHubProducerClient | None = self.get_client()
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
 
     def get_client(self) -> EventHubProducerClient:
         return EventHubProducerClient(
@@ -243,26 +226,21 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             "acquire_timeout": pool_connection_create_timeout,
         }
 
-    async def create(self) -> ProducerClientCloseWrapper:
+    async def create(self) -> Eventhub:
         """Creates a new connection for our pool"""
-        client = Eventhub(
+        return Eventhub(
             self.eventhub_namespace,
             self.eventhub_name,
             self.credential_factory(),
             eventhub_transport_type=self.eventhub_transport_type,
         )
-        return ProducerClientCloseWrapper(client.get_client(), client.credential)
 
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning(f"Eventhub credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "Eventhub.ready")
-    async def ready(self, conn: ProducerClientCloseWrapper) -> bool:
+    async def ready(self, conn: Eventhub) -> bool:
         """Establishes readiness for a new connection"""
         # Create a batch.
         event_data_batch: EventDataBatch = await conn.create_batch()
