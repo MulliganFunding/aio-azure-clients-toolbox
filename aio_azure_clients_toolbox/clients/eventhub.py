@@ -30,7 +30,7 @@ class ProducerClientCloseWrapper:
         self, client: EventHubProducerClient, credential: DefaultAzureCredential
     ):
         self._client = client
-        self._credential = copy.deepcopy(credential)
+        self._credential = copy.copy(credential)
 
     def __getattr__(self, name: str):
         return getattr(self._client, name)

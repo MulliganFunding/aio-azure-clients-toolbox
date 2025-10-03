@@ -36,7 +36,7 @@ class SendClientCloseWrapper:
 
     def __init__(self, sender: ServiceBusSender, credential: DefaultAzureCredential):
         self._sender = sender
-        self._credential = copy.deepcopy(credential)
+        self._credential = copy.copy(credential)
 
     def __getattr__(self, name: str):
         return getattr(self._sender, name)
