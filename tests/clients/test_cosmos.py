@@ -14,7 +14,7 @@ def cos_client():
         "https://documents.example.com",
         "testing-db",
         "testing-container",
-        mock.AsyncMock(),
+        lambda: mock.AsyncMock(),
     )
 
 
@@ -177,7 +177,7 @@ def managed_cos_client():
         "https://documents.example.com",
         "testing-db",
         "testing-container",
-        mock.AsyncMock(),
+        lambda: mock.AsyncMock(),
     )
 
 

@@ -358,7 +358,7 @@ def sbus(mockservicebus):
     return clients.service_bus.AzureServiceBus(
         "https://sbus.example.com",
         "fake-queue-name",
-        mock.AsyncMock(),  # fake credential
+        lambda: mock.AsyncMock(),  # fake credential
     )
 
 
@@ -367,5 +367,5 @@ def managed_sbus(mockservicebus):
     return clients.service_bus.ManagedAzureServiceBusSender(
         "https://sbus.example.com",
         "fake-queue-name",
-        mock.AsyncMock(),  # fake credential
+        lambda: mock.AsyncMock(),  # fake credential
     )

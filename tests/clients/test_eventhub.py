@@ -24,7 +24,7 @@ def managed_ehub(mockehub):
     return eventhub.ManagedAzureEventhubProducer(
         "namespace_url.example.net",
         "name",
-        mock.AsyncMock(),  # credential
+        lambda: mock.AsyncMock(),  # credential
     )
 
 
