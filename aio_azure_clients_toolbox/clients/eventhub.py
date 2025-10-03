@@ -1,5 +1,6 @@
 import logging
 import traceback
+import warnings
 
 from azure.eventhub import EventData, EventDataBatch, TransportType
 from azure.eventhub.aio import EventHubProducerClient
@@ -13,6 +14,8 @@ from azure.eventhub.exceptions import (
 from azure.identity.aio import DefaultAzureCredential
 
 from aio_azure_clients_toolbox import connection_pooling
+
+from .types import CredentialFactory
 
 TRANSPORT_PURE_AMQP = "amqp"
 EVENTHUB_SEND_TTL_SECONDS = 220
@@ -206,7 +209,8 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         eventhub_namespace: str,
         eventhub_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
+        credential: DefaultAzureCredential | None = None,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
@@ -219,7 +223,13 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
         self.eventhub_transport_type = eventhub_transport_type
-        self.credential = credential
+        self.credential_factory = credential_factory
+        if credential is not None:
+            warnings.warn(
+                "Passing a credential instance is deprecated, please pass a credential factory",
+                DeprecationWarning,
+                stacklevel=3,
+            )
         self.pool = connection_pooling.ConnectionPool(
             self,
             client_limit=client_limit,
@@ -238,10 +248,10 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         client = Eventhub(
             self.eventhub_namespace,
             self.eventhub_name,
-            self.credential,
+            self.credential_factory(),
             eventhub_transport_type=self.eventhub_transport_type,
         )
-        return ProducerClientCloseWrapper(client.get_client(), self.credential)
+        return ProducerClientCloseWrapper(client.get_client(), client.credential)
 
     async def close(self):
         """Closes all connections in our pool"""

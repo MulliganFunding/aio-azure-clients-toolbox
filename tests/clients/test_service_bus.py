@@ -35,7 +35,7 @@ async def test_close(sbus):
     await sbus.close()
     assert sbus._receiver_client is None
     assert sbus._sender_client is None
-    assert sbus._client is None
+    assert sbus._receiver_credential is None
 
 
 async def test_send_message(sbus, mockservicebus):
