@@ -84,10 +84,6 @@ class Eventhub:
         if self._client is not None:
             await self._client.close()
             self._client = None
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.exception(f"Eventhub credential close failed with {exc}")
 
     async def send_event_data(
         self,
