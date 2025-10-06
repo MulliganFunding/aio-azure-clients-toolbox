@@ -2,13 +2,12 @@ import enum
 import logging
 import time
 import traceback
-import warnings
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from azure.core import MatchConditions
 from azure.cosmos import exceptions
-from azure.cosmos.aio import ContainerProxy, CosmosClient
+from azure.cosmos.aio import ContainerProxy, CosmosClient, DatabaseProxy
 from azure.identity.aio import DefaultAzureCredential
 
 from aio_azure_clients_toolbox import connection_pooling
@@ -124,7 +123,13 @@ class ConnectionManager:
     async def recycle_container(self):
         if self._client is not None:
             await self._client.close()
+        try:
+            if self._credential is not None:
+                await self._credential.close()
+        except Exception as exc:
+            logger.warning(f"Cosmos Credential close failed with {exc}")
 
+        self._credential = None
         self._client = None
         self._database = None
         self._container = None
@@ -225,16 +230,16 @@ class SimpleCosmos:
         self.db_name = dbname
         self.container_name = container_name
         # when these connecttions gets created they will be parked here
-        self._container = None
-        self._client = None
-        self._db = None
+        self._container: ContainerProxy | None = None
+        self._client: CosmosClient | None = None
+        self._db: DatabaseProxy | None = None
 
     def __getattr__(self, key: str):
         if self._container is None:
             raise AttributeError("Container client not constructed")
         return getattr(self._container, key)
 
-    async def get_container_client(self) -> ContainerProxy:
+    async def get_container_client(self) -> "SimpleCosmos":
         """
         This method will return a container client.
         """

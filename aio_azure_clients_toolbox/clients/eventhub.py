@@ -1,6 +1,5 @@
 import logging
 import traceback
-import warnings
 
 from azure.eventhub import EventData, EventDataBatch, TransportType
 from azure.eventhub.aio import EventHubProducerClient

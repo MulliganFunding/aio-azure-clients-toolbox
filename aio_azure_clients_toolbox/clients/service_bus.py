@@ -8,7 +8,7 @@ subscribing to a queue.
 import datetime
 import logging
 import traceback
-import warnings
+from typing import cast
 
 from azure.core import exceptions
 from azure.identity.aio import DefaultAzureCredential
@@ -71,7 +71,7 @@ class AzureServiceBus:
         self.credential_factory = credential_factory
         self._receiver_client: ServiceBusReceiver | None = None
         self._receiver_credential: DefaultAzureCredential | None = None
-        self._sender_client: ServiceBusSender | None = None
+        self._sender_client: SendClientCloseWrapper | None = None
 
     def _validate_access_settings(self):
         if not all((self.namespace_url, self.queue_name)):
@@ -97,8 +97,9 @@ class AzureServiceBus:
         credential = self.credential_factory()
         sbc = ServiceBusClient(self.namespace_url, credential)
 
-        self._sender_client = sbc.get_queue_sender(queue_name=self.queue_name)
-        return SendClientCloseWrapper(self._sender_client, credential)
+        sender_client = sbc.get_queue_sender(queue_name=self.queue_name)
+        self._sender_client = SendClientCloseWrapper(sender_client, credential)
+        return self._sender_client
 
     async def close(self):
         if self._receiver_client is not None:
@@ -188,9 +189,9 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         )
         return client.get_sender()
 
-    async def create(self) -> SendClientCloseWrapper:
+    async def create(self) -> connection_pooling.AbstractConnection:
         """Creates a new connection for our pool"""
-        return self.get_sender()
+        return cast(connection_pooling.AbstractConnection, self.get_sender())
 
     def get_receiver(self) -> ServiceBusReceiver:
         """
@@ -241,7 +242,9 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
         async with self.pool.get(**self.pool_kwargs) as conn:
             try:
-                await conn.schedule_messages(message, scheduled_time_utc)
+                await cast(SendClientCloseWrapper, conn).schedule_messages(
+                    message, scheduled_time_utc
+                )
             except (
                 ServiceBusCommunicationError,
                 ServiceBusAuthorizationError,
