@@ -337,7 +337,9 @@ class SharedTransportConnection:
                 await self.close()
 
     @asynccontextmanager
-    async def acquire(self, timeout=10) -> AsyncGenerator[AbstractConnection | None, None]:
+    async def acquire(
+        self, timeout: float = 10.0
+    ) -> AsyncGenerator[AbstractConnection | None, None]:
         """Acquire a connection with a timeout"""
         acquired_conn = None
         async with create_task_group():
@@ -464,8 +466,8 @@ class ConnectionPool:
     @asynccontextmanager
     async def get(
         self,
-        timeout: int = 60.0,
-        acquire_timeout: int = 10.0,
+        timeout: float = 60.0,
+        acquire_timeout: float = 10.0,
     ) -> AsyncGenerator[AbstractConnection, None]:
         """
         Pull out an idle connection.
@@ -477,7 +479,7 @@ class ConnectionPool:
         Throws: `ConnectionsExhausted` if too many connections opened.
         """
         connection_reached = False
-        total_time = 0
+        total_time: float = 0
         # We'll loop through roughly half the pool to find a candidate
         # We add one in case it's zero.
         now = time.monotonic()
