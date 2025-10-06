@@ -73,16 +73,13 @@ class ConnectionManager:
         dbname: str,
         container_name: str,
         credential_factory: CredentialFactory,
-        credential: DefaultAzureCredential | None = None,
         lifespan_enabled: bool = False,
         cosmos_client_ttl_seconds: int = CLIENT_TTL_SECONDS_DEFAULT,
     ):
         self.endpoint = endpoint
-        if credential is not None:
-            warnings.warn(
-                "Passing a credential instance is deprecated, please pass a credential factory",
-                DeprecationWarning,
-                stacklevel=3,
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
             )
 
         self.db_name = dbname
@@ -182,7 +179,6 @@ class Cosmos:
         dbname: str,
         container_name: str,
         credential_factory: CredentialFactory,
-        credential: DefaultAzureCredential | None = None,
         cosmos_client_ttl_seconds: int = CLIENT_TTL_SECONDS_DEFAULT,
     ):
         self.container_name = container_name
@@ -191,7 +187,6 @@ class Cosmos:
             dbname,
             container_name,
             credential_factory,
-            credential=credential,
             lifespan_enabled=False,
             cosmos_client_ttl_seconds=cosmos_client_ttl_seconds,
         )
@@ -300,7 +295,6 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         dbname: str,
         container_name: str,
         credential_factory: CredentialFactory,
-        credential: DefaultAzureCredential | None = None,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = CLIENT_IDLE_SECONDS_DEFAULT,
@@ -311,11 +305,9 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         self.endpoint = endpoint
         self.dbname = dbname
         self.container_name = container_name
-        if credential is not None:
-            warnings.warn(
-                "Passing a credential instance is deprecated, please pass a credential factory",
-                DeprecationWarning,
-                stacklevel=3,
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
             )
         self.credential_factory = credential_factory
         self.max_idle_seconds = max_idle_seconds

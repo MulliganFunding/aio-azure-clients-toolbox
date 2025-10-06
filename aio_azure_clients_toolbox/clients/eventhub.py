@@ -193,7 +193,6 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         eventhub_namespace: str,
         eventhub_name: str,
         credential_factory: CredentialFactory,
-        credential: DefaultAzureCredential | None = None,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
@@ -206,13 +205,11 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
         self.eventhub_transport_type = eventhub_transport_type
-        self.credential_factory = credential_factory
-        if credential is not None:
-            warnings.warn(
-                "Passing a credential instance is deprecated, please pass a credential factory",
-                DeprecationWarning,
-                stacklevel=3,
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
             )
+        self.credential_factory = credential_factory
         self.pool = connection_pooling.ConnectionPool(
             self,
             client_limit=client_limit,

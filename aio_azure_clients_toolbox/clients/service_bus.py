@@ -61,17 +61,14 @@ class AzureServiceBus:
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
         credential_factory: CredentialFactory,
-        credential: DefaultAzureCredential | None = None,
     ):
         self.namespace_url = service_bus_namespace_url
         self.queue_name = service_bus_queue_name
-        self.credential_factory = credential_factory
-        if credential is not None:
-            warnings.warn(
-                "Passing a credential instance is deprecated, please pass a credential factory",
-                DeprecationWarning,
-                stacklevel=3,
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
             )
+        self.credential_factory = credential_factory
         self._receiver_client: ServiceBusReceiver | None = None
         self._receiver_credential: DefaultAzureCredential | None = None
         self._sender_client: ServiceBusSender | None = None
@@ -154,7 +151,6 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
         credential_factory: CredentialFactory,
-        credential: DefaultAzureCredential | None = None,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
@@ -165,13 +161,11 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
-        self.credential_factory = credential_factory
-        if credential is not None:
-            warnings.warn(
-                "Passing a credential instance is deprecated, please pass a credential factory",
-                DeprecationWarning,
-                stacklevel=3,
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
             )
+        self.credential_factory = credential_factory
 
         self.pool = connection_pooling.ConnectionPool(
             self,

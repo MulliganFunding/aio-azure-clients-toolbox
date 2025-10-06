@@ -1,6 +1,6 @@
 [project]
 name = "aio-azure-clients-toolbox"
-version = "0.6.1"
+version = "1.0.0"
 description = "Async Azure Clients Mulligan Python projects"
 authors = [
     { "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" },
