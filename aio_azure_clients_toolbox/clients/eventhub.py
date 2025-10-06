@@ -1,5 +1,6 @@
 import logging
 import traceback
+import warnings
 
 from azure.eventhub import EventData, EventDataBatch, TransportType
 from azure.eventhub.aio import EventHubProducerClient
@@ -14,29 +15,11 @@ from azure.identity.aio import DefaultAzureCredential
 
 from aio_azure_clients_toolbox import connection_pooling
 
+from .types import CredentialFactory
+
 TRANSPORT_PURE_AMQP = "amqp"
 EVENTHUB_SEND_TTL_SECONDS = 220
 logger = logging.getLogger(__name__)
-
-
-class ProducerClientCloseWrapper:
-    """
-    Wrapper class for an EventHubProducerClient which ensures that the client is closed
-    after use.
-    """
-
-    def __init__(
-        self, client: EventHubProducerClient, credential: DefaultAzureCredential
-    ):
-        self._client = client
-        self._credential = credential
-
-    def __getattr__(self, name: str):
-        return getattr(self._client, name)
-
-    async def close(self):
-        await self._client.close()
-        await self._credential.close()
 
 
 class Eventhub:
@@ -64,6 +47,9 @@ class Eventhub:
             else {"transport_type": TransportType.AmqpOverWebsocket}
         )
         self._client: EventHubProducerClient | None = self.get_client()
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
 
     def get_client(self) -> EventHubProducerClient:
         return EventHubProducerClient(
@@ -206,7 +192,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         eventhub_namespace: str,
         eventhub_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
@@ -219,7 +205,11 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
         self.eventhub_transport_type = eventhub_transport_type
-        self.credential = credential
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
+            )
+        self.credential_factory = credential_factory
         self.pool = connection_pooling.ConnectionPool(
             self,
             client_limit=client_limit,
@@ -233,26 +223,21 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             "acquire_timeout": pool_connection_create_timeout,
         }
 
-    async def create(self) -> ProducerClientCloseWrapper:
+    async def create(self) -> Eventhub:
         """Creates a new connection for our pool"""
-        client = Eventhub(
+        return Eventhub(
             self.eventhub_namespace,
             self.eventhub_name,
-            self.credential,
+            self.credential_factory(),
             eventhub_transport_type=self.eventhub_transport_type,
         )
-        return ProducerClientCloseWrapper(client.get_client(), self.credential)
 
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning(f"Eventhub credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "Eventhub.ready")
-    async def ready(self, conn: ProducerClientCloseWrapper) -> bool:
+    async def ready(self, conn: Eventhub) -> bool:
         """Establishes readiness for a new connection"""
         # Create a batch.
         event_data_batch: EventDataBatch = await conn.create_batch()

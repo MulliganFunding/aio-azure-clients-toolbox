@@ -2,6 +2,7 @@ import enum
 import logging
 import time
 import traceback
+import warnings
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
@@ -11,6 +12,8 @@ from azure.cosmos.aio import ContainerProxy, CosmosClient
 from azure.identity.aio import DefaultAzureCredential
 
 from aio_azure_clients_toolbox import connection_pooling
+
+from .types import CredentialFactory
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -63,19 +66,25 @@ class Operation:
 
 
 class ConnectionManager:
+
     def __init__(
         self,
         endpoint: str,
         dbname: str,
         container_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
         lifespan_enabled: bool = False,
         cosmos_client_ttl_seconds: int = CLIENT_TTL_SECONDS_DEFAULT,
     ):
         self.endpoint = endpoint
-        self.credential = credential
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
+            )
+
         self.db_name = dbname
         self.container_name = container_name
+        self.credential_factory = credential_factory
         self.client_lifespan_seconds = cosmos_client_ttl_seconds
         self.lifespan_enabled = lifespan_enabled
         if self.lifespan_enabled and not self.client_lifespan_seconds:
@@ -86,6 +95,7 @@ class ConnectionManager:
             raise ValueError(f"Client lifespan must be positive: {self.client_lifespan_seconds}")
 
         # These are clients that must be managed manually
+        self._credential = None
         self._client = None
         self._database = None
         self._container = None
@@ -114,10 +124,6 @@ class ConnectionManager:
     async def recycle_container(self):
         if self._client is not None:
             await self._client.close()
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning("Error closing Cosmos credential: %s", exc)
 
         self._client = None
         self._database = None
@@ -136,7 +142,8 @@ class ConnectionManager:
 
         if self.is_container_closed:
             logger.info("Creating new Cosmos client")
-            self._client = CosmosClient(self.endpoint, credential=self.credential)
+            self._credential = self.credential_factory()
+            self._client = CosmosClient(self.endpoint, credential=self._credential)
             self._database = self._client.get_database_client(self.db_name)
             self._container = self._database.get_container_client(self.container_name)
             self._client_lifespan_started = time.monotonic()
@@ -171,7 +178,7 @@ class Cosmos:
         endpoint: str,
         dbname: str,
         container_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
         cosmos_client_ttl_seconds: int = CLIENT_TTL_SECONDS_DEFAULT,
     ):
         self.container_name = container_name
@@ -179,7 +186,7 @@ class Cosmos:
             endpoint,
             dbname,
             container_name,
-            credential,
+            credential_factory,
             lifespan_enabled=False,
             cosmos_client_ttl_seconds=cosmos_client_ttl_seconds,
         )
@@ -240,6 +247,11 @@ class SimpleCosmos:
         if self._client is not None:
             await self._client.close()
 
+        try:
+            await self.credential.close()
+        except Exception as exc:
+            logger.warning(f"Credential close failed with {exc}")
+
         self._container = None
         self._db = None
         self._client = None
@@ -282,7 +294,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         endpoint: str,
         dbname: str,
         container_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = CLIENT_IDLE_SECONDS_DEFAULT,
@@ -293,7 +305,11 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         self.endpoint = endpoint
         self.dbname = dbname
         self.container_name = container_name
-        self.credential = credential
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
+            )
+        self.credential_factory = credential_factory
         self.max_idle_seconds = max_idle_seconds
         self.pool = connection_pooling.ConnectionPool(
             self,
@@ -313,7 +329,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
             self.endpoint,
             self.dbname,
             self.container_name,
-            self.credential,
+            self.credential_factory(),
         )
         await client.get_container_client()
         return client
@@ -339,10 +355,6 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning(f"Credential close failed with {exc}")
 
     @asynccontextmanager
     async def get_container_client(self):

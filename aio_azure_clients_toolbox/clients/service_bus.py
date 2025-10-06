@@ -8,6 +8,7 @@ subscribing to a queue.
 import datetime
 import logging
 import traceback
+import warnings
 
 from azure.core import exceptions
 from azure.identity.aio import DefaultAzureCredential
@@ -22,6 +23,8 @@ from azure.servicebus.exceptions import (
 )
 
 from aio_azure_clients_toolbox import connection_pooling
+
+from .types import CredentialFactory
 
 # Actual time limit: 240s
 SERVICE_BUS_SEND_TTL_SECONDS = 200
@@ -57,32 +60,32 @@ class AzureServiceBus:
         self,
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
     ):
         self.namespace_url = service_bus_namespace_url
         self.queue_name = service_bus_queue_name
-        self.credential = credential
-        self._client: ServiceBusClient | None = None
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
+            )
+        self.credential_factory = credential_factory
         self._receiver_client: ServiceBusReceiver | None = None
+        self._receiver_credential: DefaultAzureCredential | None = None
         self._sender_client: ServiceBusSender | None = None
 
     def _validate_access_settings(self):
-        if not all((self.namespace_url, self.queue_name, self.credential)):
+        if not all((self.namespace_url, self.queue_name)):
             raise ValueError("Invalid configuration for AzureServiceBus")
         return None
-
-    @property
-    def client(self):
-        if self._client is None:
-            self._validate_access_settings()
-            self._client = ServiceBusClient(self.namespace_url, self.credential)
-        return self._client
 
     def get_receiver(self) -> ServiceBusReceiver:
         if self._receiver_client is not None:
             return self._receiver_client
 
-        self._receiver_client = self.client.get_queue_receiver(
+        credential = self.credential_factory()
+        self._receiver_credential = credential
+        sbc = ServiceBusClient(self.namespace_url, credential)
+        self._receiver_client = sbc.get_queue_receiver(
             queue_name=self.queue_name, receive_mode=ServiceBusReceiveMode.PEEK_LOCK
         )
         return self._receiver_client
@@ -91,26 +94,23 @@ class AzureServiceBus:
         if self._sender_client is not None:
             return self._sender_client
 
-        self._sender_client = self.client.get_queue_sender(queue_name=self.queue_name)
-        return SendClientCloseWrapper(self._sender_client, self.credential)
+        credential = self.credential_factory()
+        sbc = ServiceBusClient(self.namespace_url, credential)
+
+        self._sender_client = sbc.get_queue_sender(queue_name=self.queue_name)
+        return SendClientCloseWrapper(self._sender_client, credential)
 
     async def close(self):
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning(f"ServiceBus credential close failed with {exc}")
-
         if self._receiver_client is not None:
             await self._receiver_client.close()
             self._receiver_client = None
+        if self._receiver_credential is not None:
+            await self._receiver_credential.close()
+            self._receiver_credential = None
 
         if self._sender_client is not None:
             await self._sender_client.close()
             self._sender_client = None
-
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
 
     async def send_message(self, msg: str, delay: int = 0):
         message = ServiceBusMessage(msg)
@@ -150,7 +150,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         self,
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
-        credential: DefaultAzureCredential,
+        credential_factory: CredentialFactory,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
@@ -161,7 +161,12 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
-        self.credential = credential
+        if not callable(credential_factory):
+            raise ValueError(
+                "credential_factory must be a callable returning a credential"
+            )
+        self.credential_factory = credential_factory
+
         self.pool = connection_pooling.ConnectionPool(
             self,
             client_limit=client_limit,
@@ -179,7 +184,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         client = AzureServiceBus(
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
-            self.credential,
+            self.credential_factory,
         )
         return client.get_sender()
 
@@ -195,17 +200,13 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         client = AzureServiceBus(
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
-            self.credential,
+            self.credential_factory,
         )
         return client.get_receiver()
 
     async def close(self):
         """Closes all connections in our pool"""
         await self.pool.closeall()
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.warning(f"Credential close failed with {exc}")
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
     async def ready(self, conn: SendClientCloseWrapper) -> bool:
