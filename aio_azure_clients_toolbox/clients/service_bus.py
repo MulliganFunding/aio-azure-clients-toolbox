@@ -8,7 +8,6 @@ subscribing to a queue.
 import datetime
 import logging
 import traceback
-import warnings
 
 from azure.core import exceptions
 from azure.identity.aio import DefaultAzureCredential

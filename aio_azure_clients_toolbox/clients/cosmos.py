@@ -2,7 +2,6 @@ import enum
 import logging
 import time
 import traceback
-import warnings
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
@@ -124,7 +123,13 @@ class ConnectionManager:
     async def recycle_container(self):
         if self._client is not None:
             await self._client.close()
+        try:
+            if self._credential is not None:
+                await self._credential.close()
+        except Exception as exc:
+            logger.warning(f"Cosmos Credential close failed with {exc}")
 
+        self._credential = None
         self._client = None
         self._database = None
         self._container = None
