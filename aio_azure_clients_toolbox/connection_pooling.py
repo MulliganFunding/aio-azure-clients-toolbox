@@ -365,6 +365,8 @@ class SharedTransportConnection:
             # Check if we need to expire connections based on lifespan
             if self.max_lifespan_ns is not None:
                 self.connection_created_ts = time.monotonic_ns()
+
+            self._should_close = False
             return self._connection
 
     @property
