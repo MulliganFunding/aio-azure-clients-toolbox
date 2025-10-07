@@ -337,7 +337,7 @@ class SharedTransportConnection:
 
             # Check if TTL exceeded for this connection
             if self.max_lifespan_ns is not None and self.expired:
-                self._should_close = True
+                await self.close()
 
     @asynccontextmanager
     async def acquire(
@@ -360,9 +360,6 @@ class SharedTransportConnection:
         else:
             await self.checkin()
             yield None
-
-        if self._should_close:
-            await self.close()
 
     async def create(self) -> AbstractConnection:
         """Establishes the connection or reuses existing if already created."""
