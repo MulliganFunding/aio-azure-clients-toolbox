@@ -205,7 +205,10 @@ class SharedTransportConnection:
     @property
     def available(self):
         """Check if connection exists and client usage limit has been reached"""
-        return self.current_client_count < self.max_clients_allowed
+        return (
+            self.current_client_count < self.max_clients_allowed
+            and not self._should_close
+        )
 
     @property
     def current_client_count(self):
@@ -366,7 +369,6 @@ class SharedTransportConnection:
             if self.max_lifespan_ns is not None:
                 self.connection_created_ts = time.monotonic_ns()
 
-            self._should_close = False
             return self._connection
 
     @property
@@ -408,6 +410,8 @@ class SharedTransportConnection:
             except Exception:
                 pass
 
+            # Reset attributes to initial state
+            self._should_close = False
             self._connection = None
             self._ready = anyio.Event()
             self.last_idle_start = None
