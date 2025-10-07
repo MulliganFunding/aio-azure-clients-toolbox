@@ -267,7 +267,7 @@ class SharedTransportConnection:
     def __eq__(self, other):
         return (
             self.is_ready == other.is_ready
-            and self.expired == other.expired
+            and self.should_close == other.should_close
             and self.current_client_count == other.current_client_count
             and self.time_spent_idle == other.time_spent_idle
         )
