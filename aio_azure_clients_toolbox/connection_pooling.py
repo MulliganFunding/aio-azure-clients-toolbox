@@ -264,6 +264,7 @@ class SharedTransportConnection:
     def __eq__(self, other):
         return (
             self.is_ready == other.is_ready
+            and self.expired == other.expired
             and self.current_client_count == other.current_client_count
             and self.time_spent_idle == other.time_spent_idle
         )
@@ -289,16 +290,9 @@ class SharedTransportConnection:
         # Bookkeeping: we want to know how long it takes to acquire a connection
         now = time.monotonic_ns()
 
-        # # We use a semaphore to manage client limits
-        # await self.client_limiter.acquire()
-
         if self.expired and self.current_client_count == 1:
             logger.debug(f"{self} Retiring Connection past its lifespan")
-            # Question: can it be closed because one of our clients yielded
-            # its await point? In other words, can it be closed out from under a client?
-            # self.current_client_count == 1 *should* mean this is the only task!
-            # await self.close()
-            self._should_close = True
+            await self.close()
 
         if not self._connection:
             self._connection = await self.create()
@@ -315,30 +309,25 @@ class SharedTransportConnection:
 
         # Debug timings to reveal the extent of lock contention
         logger.debug(
-            f"{self} available in {time.monotonic_ns()-now}ns "
+            f"[checkout] {self} available in {time.monotonic_ns()-now}ns "
             f"semaphore state {repr(self.client_limiter)} "
             f"Active client count: {self.current_client_count}"
         )
         return self._connection
 
-    async def checkin(self):
+    async def checkin(self, conn: AbstractConnection | None = None) -> None:
         """Called after a connection has been used"""
-        # Release the client limit semaphore!
-        # try:
-        #     self.client_limiter.release()
-        # except RuntimeError:
-        #     pass
-
-        logger.debug(f"{self}.current_client_count is now {self.current_client_count}")
+        logger.debug(
+            f"[checkin] {self}.current_client_count is now {self.current_client_count}"
+        )
 
         # we only consider idle time to start when *one* client is connected
-        if self.current_client_count == 1:
+        if self.current_client_count == 1 and conn is not None:
             logger.debug(f"{self} is now idle")
             self.last_idle_start = time.monotonic_ns()
 
         # Check if TTL exceeded for this connection
         if self.max_lifespan_ns is not None and self.expired:
-            # await self.close()
             self._should_close = True
 
     @asynccontextmanager
@@ -359,10 +348,10 @@ class SharedTransportConnection:
                 try:
                     yield acquired_conn
                 finally:
-                    await self.checkin()
+                    await self.checkin(acquired_conn)
             else:
                 yield None
-                await self.checkin()
+                await self.checkin(None)
 
     async def create(self) -> AbstractConnection:
         """Establishes the connection or reuses existing if already created."""
@@ -491,10 +480,10 @@ class ConnectionPool:
         """
         connection_reached = False
         total_time: float = 0
-        # We'll loop through roughly half the pool to find a candidate
+        # We'll loop almost all connections in the pool to find a candidate
         # We add one in case it's zero.
         now = time.monotonic()
-        conn_check_n = (self.max_size // 2) + 1
+        conn_check_n = self.max_size - 1 or 1
         while not connection_reached and total_time < timeout:
             for shareable_conn in heapq.nsmallest(conn_check_n, self._pool):
                 if shareable_conn.available:
@@ -504,14 +493,14 @@ class ConnectionPool:
                             yield conn
                             connection_reached = True
                             break
+                elif shareable_conn.should_close:
+                    logger.debug(f"{shareable_conn} Connection expired during acquire")
+                    await shareable_conn.close()
+
             # Arbitrary async yield to avoid busy loop
-            await anyio.sleep(0.01)
+            await anyio.sleep(0.002)
             latest = time.monotonic()
             total_time += latest - now
-
-        for shareable_conn in self._pool:
-            if shareable_conn.should_close:
-                await shareable_conn.close()
 
         if connection_reached:
             heapq.heapify(self._pool)

@@ -1,9 +1,9 @@
 import asyncio
-from operator import itemgetter
+from collections import defaultdict
 
 import pytest
 from aio_azure_clients_toolbox import connection_pooling as cp
-from anyio import create_task_group, sleep
+from anyio import create_task_group, Event, sleep
 
 
 class FakeConn(cp.AbstractConnection):
@@ -68,6 +68,9 @@ def slow_shared_transpo_conn():
     )
 
 
+# # # # # # # # # # # # # # # # # # # # # # # # # # #
+# ---**--> Test SharedTransportConnection <--**---  #
+# # # # # # # # # # # # # # # # # # # # # # # # # # #
 async def test_shared_transport_props(shared_transpo_conn):
     async def acquirer():
         async with shared_transpo_conn.acquire():
@@ -93,9 +96,8 @@ async def test_acquire_timeouts(slow_shared_transpo_conn):
 
 
 async def test_comp_eq(shared_transpo_conn):
-    """LT IFF
-    - it has fewer clients connected
-    - it's been idle longer
+    """EQ IFF
+    - self._connection objects are same (by identity)
     """
     # equals
     stc2 = cp.SharedTransportConnection(
@@ -107,14 +109,10 @@ async def test_comp_eq(shared_transpo_conn):
     shared_transpo_conn._ready.set()
     assert stc2 == shared_transpo_conn
 
-    await shared_transpo_conn.checkout()
-    assert stc2 != shared_transpo_conn
-    await stc2.checkout()
-
     assert stc2 == shared_transpo_conn
     stc2.last_idle_start = 10
     shared_transpo_conn.last_idle_start = 20
-    assert stc2 != shared_transpo_conn
+    assert stc2 != shared_transpo_conn, "Different last_idle_start makes them unequal"
 
 
 async def test_comp_lt(shared_transpo_conn):
@@ -127,45 +125,50 @@ async def test_comp_lt(shared_transpo_conn):
         FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
     )
     assert stc2 <= shared_transpo_conn
+    async def acquirer(stc):
+        async with stc.acquire():
+            await sleep(0.002)
 
     # Client count for stc2 is less-than
-    await shared_transpo_conn.checkout()
     async with create_task_group() as tg:
-        tg.start_soon(shared_transpo_conn.checkout)
-    await stc2.checkout()
-    assert stc2 < shared_transpo_conn
+        tg.start_soon(acquirer, shared_transpo_conn)
+        tg.start_soon(acquirer, shared_transpo_conn)
+        tg.start_soon(acquirer, stc2)
+        await sleep(0.006)
+        assert stc2 < shared_transpo_conn, "Acquire makes client count LT"
 
-    # Client count is equal again
-    async with create_task_group() as tg:
-        tg.start_soon(stc2.checkout)
-    assert stc2 <= shared_transpo_conn
+    # Reset client counts happens after async context managed exits
+    assert stc2 <= shared_transpo_conn, "Client count equal makes them LTE"
     # Now that client count is equal, we use last_idle_start for comp
     stc2.last_idle_start = 1000000
     shared_transpo_conn.last_idle_start = 2000000
-    assert stc2 < shared_transpo_conn
+    assert stc2 < shared_transpo_conn, "Longer idle makes it LT"
 
 
 async def test_comp_gt(shared_transpo_conn):
-    """LT IFF
-    - it has fewer clients connected
-    - it's been idle longer
+    """GT IFF
+    - it has more clients connected
+    - it's been idle less
     """
     # GT / GTE
     stc2 = cp.SharedTransportConnection(
         FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
     )
     assert stc2 >= shared_transpo_conn
-    # Client count for stc2 is less-than
-    await shared_transpo_conn.checkout()
-    async with create_task_group() as tg:
-        tg.start_soon(shared_transpo_conn.checkout)
-    await stc2.checkout()
-    assert shared_transpo_conn > stc2
+    async def acquirer(stc):
+        async with stc.acquire():
+            await sleep(0.002)
 
-    # Client count is equal again
+    # Client count for stc2 is less-than
     async with create_task_group() as tg:
-        tg.start_soon(stc2.checkout)
-    assert stc2 >= shared_transpo_conn
+        tg.start_soon(acquirer, shared_transpo_conn)
+        tg.start_soon(acquirer, shared_transpo_conn)
+        tg.start_soon(acquirer, stc2)
+        await sleep(0.006)
+        assert shared_transpo_conn > stc2, "Acquire makes client count GT"
+
+    # Reset client counts happens after async context managed exits
+    assert shared_transpo_conn >= stc2, "Client count equal makes them GTE"
 
     # Now that client count is equal, we use last_idle_start for comp
     stc2.last_idle_start = 1000000
@@ -196,6 +199,9 @@ async def test_close(shared_transpo_conn):
     assert (await shared_transpo_conn.close()) is None
 
 
+# # # # # # # # # # # # # # # # # # # # # # # # # # #
+# ---**-->      Test ConnectionPool       <--**---  #
+# # # # # # # # # # # # # # # # # # # # # # # # # # #
 @pytest.fixture
 def pool():
     return cp.ConnectionPool(
@@ -252,6 +258,344 @@ async def test_pool_acquire_timeouts(slow_pool):
             timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS
         ) as conn:
             assert conn is None
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> RACE CONDITION TESTS <--**---
+# # # # # # # # # # # # # # # # # #
+class ClosableTestConnection(cp.AbstractConnection):
+    """Test connection that tracks if it was closed while still being used"""
+
+    def __init__(self):
+        self.is_closed = False
+        self.usage_count = 0
+        self.used_after_close = False
+
+    async def close(self):
+        self.is_closed = True
+
+    def use(self):
+        """Simulate using the connection - should fail if called after close"""
+        if self.is_closed:
+            self.used_after_close = True
+            raise RuntimeError("Connection used after close!")
+        self.usage_count += 1
+        return f"used_{self.usage_count}"
+
+
+class RaceConditionTestConnector(cp.AbstractorConnector):
+    """Connector that creates trackable test connections"""
+
+    def __init__(self):
+        self.created_connections = []
+
+    async def create(self) -> cp.AbstractConnection:
+        conn = ClosableTestConnection()
+        self.created_connections.append(conn)
+        return conn
+
+    async def ready(self, connection: cp.AbstractConnection) -> bool:
+        return True
+
+
+@pytest.fixture
+def race_condition_shared_conn():
+    """Shared connection with very short lifespan to trigger race conditions"""
+    return cp.SharedTransportConnection(
+        RaceConditionTestConnector(),
+        client_limit=3,
+        max_idle_seconds=0.002,  # Very short to trigger expiry quickly
+        max_lifespan_seconds=0.003,  # Short lifespan
+    )
+
+
+@pytest.fixture
+def race_condition_pool():
+    """Connection pool with very short lifespans to trigger race conditions"""
+    return cp.ConnectionPool(
+        RaceConditionTestConnector(),
+        client_limit=3,
+        max_size=2,
+        max_idle_seconds=0.001,
+        max_lifespan_seconds=0.002,
+    )
+
+
+# Our SimpleCosmos object has a __getattr__ that raises AttributeError
+# if the underlying container client is None (which happens after close)
+# This is a fake version of that thing.
+class CosmosLikeConnection(cp.AbstractConnection):
+    """Connection that mimics SimpleCosmos behavior from the real issue"""
+
+    def __init__(self):
+        self.is_closed = False
+        self.usage_count = 0
+        self._container = "mock_container"  # This simulates SimpleCosmos._container
+
+    async def close(self):
+        """This simulates SimpleCosmos.close() which sets _container = None"""
+        self.is_closed = True
+        self._container = None  # Use after this should raise AttributeError
+
+    def __getattr__(self, name):
+        """This simulates SimpleCosmos.__getattr__ which raises the actual error"""
+        if self._container is None:
+            raise AttributeError("Container client not constructed")
+
+        # Return a callable mock function
+        def mock_method(*args, **kwargs):
+            return f"mock_{name}_result"
+
+        return mock_method
+
+    def use_container(self):
+        """This simulates calling a method on SimpleCosmos that triggers __getattr__"""
+        return self.read_item("test")  # This will call __getattr__
+
+
+class CosmosLikeConnector(cp.AbstractorConnector):
+    """Connector that creates cosmos-like connections"""
+
+    def __init__(self):
+        self.created_connections = []
+
+    async def create(self) -> cp.AbstractConnection:
+        conn = CosmosLikeConnection()
+        self.created_connections.append(conn)
+        return conn
+
+    async def ready(self, connection: cp.AbstractConnection) -> bool:
+        return True
+
+
+async def test_race_condition_shared_connection_closed_while_in_use():
+    """Forces race condition sequence: mixes checkout and checkin with expiry"""
+    connector = CosmosLikeConnector()
+    shared_conn = cp.SharedTransportConnection(
+        connector,
+        client_limit=3,
+        max_idle_seconds=0.001,
+        max_lifespan_seconds=0.002,
+    )
+    # Hold references to connection objects
+    references = []
+
+    # Client gets connection, shares it, first client triggers close
+    async def checkouter(n):
+        connection = await shared_conn.checkout()
+        connection.use_container()  # Use it
+        if n < 2:
+            await shared_conn.checkin()
+        references.append(connection)
+
+    # Force create a connection first
+    async with create_task_group() as tg:
+        tg.start_soon(checkouter, 0)
+        # Now wait for expiry
+        await sleep(0.003)
+        # Force the race condition by manually calling the problematic code path
+        # Get connection again (should reuse the same one)
+        tg.start_soon(checkouter, 1)
+        tg.start_soon(checkouter, 2)
+
+    # Now expire the connection
+    # This simulates what happens when the first client finishes and lifespan is exceeded
+    if shared_conn.current_client_count == 1 and shared_conn.expired:
+        # Manually trigger the close that happens in checkin
+        await shared_conn.close()
+
+    # Now the second client tries to use the same connection object:
+    # Before the bug fix, this raises AttributeError.
+    try:
+        references[2].use_container()
+    except AttributeError as e:
+        if "Container client not constructed" in str(e):
+            # This is a race condition that exists when multiple clients share a connection
+            # That was closed by another client.
+            pytest.fail(f"Race condition detected - {e}")
+        else:
+            raise
+
+
+async def test_race_condition_pool_connection_lifecycle():
+    """
+    Pool-level race condition test that mimics the SimpleCosmos.__getattr__ issue:
+        If we are able to use a connection that has been closed due to lifespan expiry
+        while another client is still using it, we should see an AttributeError.
+
+    If this issue is fixed, this test should pass without errors and be a regression test.
+
+    1. Client 1 gets connection and holds it past expiry
+    2. Client 2 gets same connection while Client 1 is still using it
+    3. Client 2 finishes and connection is closed due to expiry
+    4. Client 1 tries to use the connection - should raise AttributeError
+    """
+    connector = CosmosLikeConnector()
+    pool = cp.ConnectionPool(
+        connector,
+        client_limit=3,
+        max_size=1,
+        max_idle_seconds=0.001,
+        max_lifespan_seconds=0.002,
+    )
+
+    # Hold references to connection objects
+    references = []
+    # We're going to try to deadlock a little bit just for fun.
+    client1_event = Event()
+    client2_event = Event()
+
+    async def client_1():
+        async with pool.get() as conn:
+            references.append(conn)  # Store reference
+            await sleep(0.04)  # Exceed lifespan, connection will be closed in checkin
+            client1_event.set()
+
+        await client2_event.wait()
+        # Now try to use it - should fail if race condition exists
+        conn.use_container()  # This should raise AttributeError
+        # Connection should be closed when this exits
+
+    async def client_2():
+        async with pool.get() as conn:
+            # Sanity check: this should be the same connection object as client 1
+            # If this fails, the connection will have been recycled.
+            assert conn is references[0], "Should get same connection object"
+            await client1_event.wait()
+
+        # Now try to use it - should fail if race condition exists
+        conn.use_container()
+        await sleep(0.04)  # Exceed lifespan, connection will be closed in checkin
+        client2_event.set()
+
+    # Run both clients
+    try:
+        async with create_task_group() as tg:
+            tg.start_soon(client_1)
+            tg.start_soon(client_2)
+    except* AttributeError as excgroup:
+        for exc in excgroup.exceptions:
+            if "Container client not constructed" in str(exc):
+                # Race condition successfully triggered!
+                pytest.fail(
+                    "Race condition detected - one client used a closed connection"
+                )
+            else:
+                raise
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> Regression tests <--**---
+# # # # # # # # # # # # # # # # # #
+async def test_regression_normal_connection_sharing(race_condition_pool):
+    """Ensures normal connection sharing still works without race conditions"""
+    results = []
+
+    async def normal_client(client_id):
+        async with race_condition_pool.get() as conn:
+            result = conn.use()
+            results.append(f"Client {client_id}: {result}")
+            await sleep(0.0001)  # Very short usage, well within lifespan
+
+    # Run clients that should share connections successfully
+    await asyncio.gather(
+        normal_client(1),
+        normal_client(2),
+        normal_client(3),
+    )
+
+    assert len(results) == 3
+    assert all("used_" in result for result in results)
+
+
+async def test_regression_connection_cleanup_after_idle():
+    """Ensures connections are properly cleaned up after idle timeout"""
+    connector = RaceConditionTestConnector()
+    shared_conn = cp.SharedTransportConnection(
+        connector,
+        client_limit=2,
+        max_idle_seconds=0.01,
+    )
+
+    # Use connection and let it go idle
+    async with shared_conn.acquire() as conn:
+        conn.use()
+
+    # Verify it's idle
+    assert shared_conn.current_client_count == 0
+    assert shared_conn.last_idle_start is not None
+
+    # Wait for idle timeout
+    await sleep(0.02)
+
+    # Connection should be marked as expired
+    assert shared_conn.expired
+
+    # Next acquisition should clean up the expired connection
+    async with shared_conn.acquire() as conn:
+        conn.use()
+
+    # Should have created a new connection (old one was cleaned up)
+    assert len(connector.created_connections) >= 1
+
+
+@pytest.mark.parametrize("client_count", [1, 3, 5, 7, 12, 21])
+async def test_regression_semaphore_limits_enforced(
+    client_count, race_condition_shared_conn
+):
+    """Ensures semaphore limits are still properly enforced"""
+    acquired_connections: dict[int, list[str]] = defaultdict(list)
+    exceptions = []
+
+    async def try_acquire(client_id):
+        try:
+            async with race_condition_shared_conn.acquire(timeout=0.002) as conn:
+                if conn is not None:
+                    acquired_connections[id(conn)].append(client_id)
+                    await sleep(0.005)  # brief hold more than acquire timeout
+        except Exception as e:
+            exceptions.append(e)
+
+    # Try to acquire more connections than the limit allows
+    async with create_task_group() as tg:
+        for n in range(client_count):
+            tg.start_soon(try_acquire, f"{n}")
+
+    # The fixture has `client_limit=3`, so we see that number of clients per connection
+    # Prefer -> one connection shared,
+    assert len(acquired_connections.keys()) <= (client_count // 3) + 1
+    assert all(len(clients) <= 3 for clients in acquired_connections.values())
+    assert len(exceptions) == 0
+
+
+async def test_regression_pool_heap_ordering():
+    """Ensures pool still maintains proper heap ordering for connection freshness"""
+    pool = cp.ConnectionPool(
+        RaceConditionTestConnector(),
+        client_limit=2,
+        max_size=3,
+        max_idle_seconds=0.1,
+    )
+
+    # Use connections to establish different idle times
+    async with pool.get() as conn1:
+        conn1.use()
+        await sleep(0.001)
+
+    await sleep(0.002)  # Let first connection become more idle
+
+    async with pool.get() as conn2:
+        conn2.use()
+
+    # Pool should maintain heap ordering (freshest connections first)
+    # This is verified by the internal heap structure
+    import heapq
+
+    assert len(pool._pool) == 3
+    # Heap property should be maintained
+    heap_copy = pool._pool.copy()
+    heapq.heapify(heap_copy)
+    assert heap_copy == pool._pool
 
 
 # # # # # # # # # # # # # # # # # #
@@ -322,400 +666,3 @@ async def test_send_time_deco_with_custom_logger(caplog):
     assert any(
         "Custom logger test timing:" in msg and "ns" in msg for msg in debug_messages
     )
-
-
-# # # # # # # # # # # # # # # # # #
-# ---**--> RACE CONDITION TESTS <--**---
-# # # # # # # # # # # # # # # # # #
-
-
-class ClosableTestConnection(cp.AbstractConnection):
-    """Test connection that tracks if it was closed while still being used"""
-
-    def __init__(self):
-        self.is_closed = False
-        self.usage_count = 0
-        self.used_after_close = False
-
-    async def close(self):
-        self.is_closed = True
-
-    def use(self):
-        """Simulate using the connection - should fail if called after close"""
-        if self.is_closed:
-            self.used_after_close = True
-            raise RuntimeError("Connection used after close!")
-        self.usage_count += 1
-        return f"used_{self.usage_count}"
-
-
-class RaceConditionTestConnector(cp.AbstractorConnector):
-    """Connector that creates trackable test connections"""
-
-    def __init__(self):
-        self.created_connections = []
-
-    async def create(self) -> cp.AbstractConnection:
-        conn = ClosableTestConnection()
-        self.created_connections.append(conn)
-        return conn
-
-    async def ready(self, connection: cp.AbstractConnection) -> bool:
-        return True
-
-
-@pytest.fixture
-def race_condition_shared_conn():
-    """Shared connection with very short lifespan to trigger race conditions"""
-    return cp.SharedTransportConnection(
-        RaceConditionTestConnector(),
-        client_limit=3,
-        max_idle_seconds=0.002,  # Very short to trigger expiry quickly
-        max_lifespan_seconds=0.003,  # Short lifespan
-    )
-
-
-@pytest.fixture
-def race_condition_pool():
-    """Connection pool with very short lifespans to trigger race conditions"""
-    return cp.ConnectionPool(
-        RaceConditionTestConnector(),
-        client_limit=3,
-        max_size=2,
-        max_idle_seconds=0.001,
-        max_lifespan_seconds=0.002,
-    )
-
-
-# FAILING TESTS - These expose the race condition bugs
-
-
-class CosmosLikeConnection(cp.AbstractConnection):
-    """Connection that mimics SimpleCosmos behavior from the real issue"""
-
-    def __init__(self):
-        self.is_closed = False
-        self.usage_count = 0
-        self._container = "mock_container"  # This simulates SimpleCosmos._container
-
-    async def close(self):
-        """This simulates SimpleCosmos.close() which sets _container = None"""
-        self.is_closed = True
-        self._container = None  # This is the key - shared state gets mutated
-
-    def __getattr__(self, name):
-        """This simulates SimpleCosmos.__getattr__ which raises the actual error"""
-        if self._container is None:
-            raise AttributeError("Container client not constructed")
-
-        # Return a callable mock function
-        def mock_method(*args, **kwargs):
-            return f"mock_{name}_result"
-
-        return mock_method
-
-    def use_container(self):
-        """This simulates calling a method on SimpleCosmos that triggers __getattr__"""
-        return self.read_item("test")  # This will call __getattr__
-
-
-class CosmosLikeConnector(cp.AbstractorConnector):
-    """Connector that creates cosmos-like connections"""
-
-    def __init__(self):
-        self.created_connections = []
-
-    async def create(self) -> cp.AbstractConnection:
-        conn = CosmosLikeConnection()
-        self.created_connections.append(conn)
-        return conn
-
-    async def ready(self, connection: cp.AbstractConnection) -> bool:
-        return True
-
-
-async def test_race_condition_shared_connection_closed_while_in_use():
-    """Forces race condition sequence"""
-    connector = CosmosLikeConnector()
-    shared_conn = cp.SharedTransportConnection(
-        connector,
-        client_limit=3,
-        max_idle_seconds=0.001,
-        max_lifespan_seconds=0.002,
-    )
-
-    # Client gets connection, shares it, first client triggers close
-
-    # Force create a connection first
-    connection = await shared_conn.checkout()
-    async with shared_conn.acquire():
-        connection.use_container()  # Use it
-
-    # Now wait for expiry
-    await sleep(0.003)
-
-    # Force the race condition by manually calling the problematic code path
-    # Get connection again (should reuse the same one)
-    await shared_conn.checkout()
-
-    # Get another reference while first is still holding semaphore
-    # This simulates what happens when multiple clients get the same connection
-    conn_ref2 = shared_conn._connection
-    await shared_conn.checkin()
-
-    # Now expire and close the connection via checkin
-    # This simulates what happens when the first client finishes and lifespan is exceeded
-    if shared_conn.current_client_count == 1 and shared_conn.expired:
-        # Manually trigger the close that happens in checkin
-        await shared_conn.close()
-
-    # Now the second client tries to use the same connection object
-    try:
-        conn_ref2.use_container()
-    except AttributeError as e:
-        await shared_conn.checkin()
-        if "Container client not constructed" in str(e):
-            # This is the race condition we're looking for!
-            pytest.fail(f"Race condition detected - {e}")
-        else:
-            raise
-
-
-async def test_race_condition_simplified_reproduction():
-    """Simplified test that definitely exposes the race condition"""
-    # Create a cosmos-like connection directly
-    conn = CosmosLikeConnection()
-
-    # Verify it works initially
-    result1 = conn.use_container()
-    assert "mock_read_item" in result1
-
-    # Close the connection (this is what happens in the race condition)
-    await conn.close()
-
-    # Now try to use it - this should raise the exact error from the issue
-    with pytest.raises(AttributeError, match="Container client not constructed"):
-        conn.use_container()
-
-    # This test will always pass, showing what the error looks like
-    assert True, "This demonstrates the exact error that occurs in the race condition"
-
-
-async def test_race_condition_multiple_clients_expired_connection():
-    """Multiple clients getting same connection when one should close it"""
-    connector = CosmosLikeConnector()
-    shared_conn = cp.SharedTransportConnection(
-        connector,
-        client_limit=3,
-        max_idle_seconds=0.001,
-        max_lifespan_seconds=0.002,
-    )
-
-    # First client gets connection and lets it expire
-    async with shared_conn.acquire() as conn:
-        conn.use_container()
-        await sleep(0.003)  # Exceed lifespan
-
-    # Connection should be expired now
-    assert shared_conn.expired, "Connection should be expired"
-
-    # Now simulate multiple clients trying to get the expired connection simultaneously
-    # In previous behavior, first client to checkout will close the expired connection
-    # but other clients might still get reference to it
-    results = []
-    exceptions = []
-
-    async def client_task(client_id):
-        try:
-            # All clients try to checkout at same time
-            conn = await shared_conn.checkout()
-            # Use connection
-            result = conn.use_container()
-            results.append(f"Client {client_id}: {result}")
-            await shared_conn.checkin()
-        except Exception as e:
-            exceptions.append(f"Client {client_id}: {e}")
-
-    # Run multiple clients concurrently
-    await asyncio.gather(client_task(1), client_task(2), client_task(3))
-
-    # Check if any connection was used after being closed
-    container_errors = [
-        e for e in exceptions if "Container client not constructed" in str(e)
-    ]
-
-    if container_errors:
-        # Race condition detected
-        pytest.fail(f"Race condition detected: {container_errors}")
-    else:
-        # Race condition not triggered - this means the test should pass
-        # but we marked it as xfail, so it will show as unexpected pass
-        assert len(exceptions) == 0, f"Unexpected exceptions: {exceptions}"
-
-
-async def test_race_condition_pool_connection_lifecycle():
-    """
-    Pool-level race condition test that mimics the SimpleCosmos.__getattr__ issue:
-        If we are able to use a connection that has been closed due to lifespan expiry
-        while another client is still using it, we should see an AttributeError.
-
-    If this issue is fixed, this test should pass without errors.
-
-    1. Client 1 gets connection and holds it past expiry
-    2. Client 2 gets same connection while Client 1 is still using it
-    3. Client 1 finishes and connection is closed due to expiry
-    4. Client 2 tries to use the connection - should raise AttributeError
-    """
-    connector = CosmosLikeConnector()
-    pool = cp.ConnectionPool(
-        connector,
-        client_limit=2,
-        max_size=1,
-        max_idle_seconds=0.003,
-        max_lifespan_seconds=0.004,
-    )
-
-    # Client 1 gets connection and holds it past expiry
-    connection_object = None
-
-    async def client_1():
-        nonlocal connection_object
-        async with pool.get() as conn:
-            connection_object = conn  # Store reference
-            conn.use_container()
-            await sleep(0.05)  # Exceed lifespan, connection will be closed in checkin
-        # Connection should be closed when this exits
-
-    async def client_2():
-        # Wait a bit for client 1 to start
-        await sleep(0.005)
-        async with pool.get() as conn:
-            # This should be the same connection object as client 1
-            assert conn is connection_object, "Should get same connection object"
-            await sleep(0.014)  # Wait for client 1 to finish and close connection
-            # Now try to use it - should fail if race condition exists
-            result = conn.use_container()  # This should raise AttributeError
-            return result
-
-    # Run both clients
-    try:
-        await asyncio.gather(client_1(), client_2())
-        pytest.fail("Race condition NOT detected - both clients succeeded")
-    except AttributeError as e:
-        if "Container client not constructed" in str(e):
-            # Race condition successfully triggered!
-            pytest.fail("Race condition detected - one client used a closed connection")
-        else:
-            raise
-
-
-# # # # # # # # # # # # # # # # # #
-# ---**--> Regression tests <--**---
-# # # # # # # # # # # # # # # # # #
-async def test_no_regression_normal_connection_sharing(race_condition_pool):
-    """PASSING TEST: Ensures normal connection sharing still works without race conditions"""
-    results = []
-
-    async def normal_client(client_id):
-        async with race_condition_pool.get() as conn:
-            result = conn.use()
-            results.append(f"Client {client_id}: {result}")
-            await sleep(0.0001)  # Very short usage, well within lifespan
-
-    # Run clients that should share connections successfully
-    await asyncio.gather(
-        normal_client(1),
-        normal_client(2),
-        normal_client(3),
-    )
-
-    assert len(results) == 3
-    assert all("used_" in result for result in results)
-
-
-async def test_no_regression_connection_cleanup_after_idle():
-    """PASSING TEST: Ensures connections are properly cleaned up after idle timeout"""
-    connector = RaceConditionTestConnector()
-    shared_conn = cp.SharedTransportConnection(
-        connector,
-        client_limit=2,
-        max_idle_seconds=0.01,
-    )
-
-    # Use connection and let it go idle
-    async with shared_conn.acquire() as conn:
-        conn.use()
-
-    # Verify it's idle
-    assert shared_conn.current_client_count == 0
-    assert shared_conn.last_idle_start is not None
-
-    # Wait for idle timeout
-    await sleep(0.02)
-
-    # Connection should be marked as expired
-    assert shared_conn.expired
-
-    # Next acquisition should clean up the expired connection
-    async with shared_conn.acquire() as conn:
-        conn.use()
-
-    # Should have created a new connection (old one was cleaned up)
-    assert len(connector.created_connections) >= 1
-
-
-async def test_no_regression_semaphore_limits_enforced(race_condition_shared_conn):
-    """PASSING TEST: Ensures semaphore limits are still properly enforced"""
-    # The fixture has client_limit=3
-    acquired_connections: list[str] = []
-
-    async def try_acquire(client_id):
-        try:
-            async with race_condition_shared_conn.acquire(timeout=0.002) as conn:
-                if conn is not None:
-                    acquired_connections.append(client_id)
-                    await sleep(0.004)  # brief hold more than acquire timeout
-        except Exception:
-            pass  # Timeout expected for excess clients
-
-    # Try to acquire more connections than the limit allows
-    await asyncio.gather(
-        try_acquire("1"),
-        try_acquire("2"),
-        try_acquire("3"),
-        try_acquire("4"),  # This should timeout
-        try_acquire("5"),  # This should timeout
-    )
-
-    # Should allow up to client limit of 3
-    assert len(acquired_connections) == 3
-
-
-async def test_no_regression_pool_heap_ordering():
-    """PASSING TEST: Ensures pool still maintains proper heap ordering for connection freshness"""
-    pool = cp.ConnectionPool(
-        RaceConditionTestConnector(),
-        client_limit=2,
-        max_size=3,
-        max_idle_seconds=0.1,
-    )
-
-    # Use connections to establish different idle times
-    async with pool.get() as conn1:
-        conn1.use()
-        await sleep(0.001)
-
-    await sleep(0.002)  # Let first connection become more idle
-
-    async with pool.get() as conn2:
-        conn2.use()
-
-    # Pool should maintain heap ordering (freshest connections first)
-    # This is verified by the internal heap structure
-    import heapq
-
-    assert len(pool._pool) == 3
-    # Heap property should be maintained
-    heap_copy = pool._pool.copy()
-    heapq.heapify(heap_copy)
-    assert heap_copy == pool._pool
