@@ -289,15 +289,16 @@ class SharedTransportConnection:
         # Bookkeeping: we want to know how long it takes to acquire a connection
         now = time.monotonic_ns()
 
-        # We use a semaphore to manage client limits
-        await self.client_limiter.acquire()
+        # # We use a semaphore to manage client limits
+        # await self.client_limiter.acquire()
 
         if self.expired and self.current_client_count == 1:
             logger.debug(f"{self} Retiring Connection past its lifespan")
             # Question: can it be closed because one of our clients yielded
             # its await point? In other words, can it be closed out from under a client?
             # self.current_client_count == 1 *should* mean this is the only task!
-            await self.close()
+            # await self.close()
+            self._should_close = True
 
         if not self._connection:
             self._connection = await self.create()
@@ -323,21 +324,22 @@ class SharedTransportConnection:
     async def checkin(self):
         """Called after a connection has been used"""
         # Release the client limit semaphore!
-        try:
-            self.client_limiter.release()
-        except RuntimeError:
-            pass
+        # try:
+        #     self.client_limiter.release()
+        # except RuntimeError:
+        #     pass
 
         logger.debug(f"{self}.current_client_count is now {self.current_client_count}")
 
-        # we only consider idle time to start when *no* clients are connected
-        if self.current_client_count == 0:
+        # we only consider idle time to start when *one* client is connected
+        if self.current_client_count == 1:
             logger.debug(f"{self} is now idle")
             self.last_idle_start = time.monotonic_ns()
 
-            # Check if TTL exceeded for this connection
-            if self.max_lifespan_ns is not None and self.expired:
-                await self.close()
+        # Check if TTL exceeded for this connection
+        if self.max_lifespan_ns is not None and self.expired:
+            # await self.close()
+            self._should_close = True
 
     @asynccontextmanager
     async def acquire(
@@ -345,21 +347,22 @@ class SharedTransportConnection:
     ) -> AsyncGenerator[AbstractConnection | None, None]:
         """Acquire a connection with a timeout"""
         acquired_conn = None
-        async with create_task_group():
-            with move_on_after(timeout) as scope:
-                acquired_conn = await self.checkout()
+        async with self.client_limiter:
+            async with create_task_group():
+                with move_on_after(timeout) as scope:
+                    acquired_conn = await self.checkout()
 
-        # If this were nested under `create_task_group` then any exceptions
-        # get thrown under `BaseExceptionGroup`, which is surprising for clients.
-        # See: https://github.com/agronholm/anyio/issues/141
-        if not scope.cancelled_caught and acquired_conn:
-            try:
-                yield acquired_conn
-            finally:
+            # If this were nested under `create_task_group` then any exceptions
+            # get thrown under `BaseExceptionGroup`, which is surprising for clients.
+            # See: https://github.com/agronholm/anyio/issues/141
+            if not scope.cancelled_caught and acquired_conn:
+                try:
+                    yield acquired_conn
+                finally:
+                    await self.checkin()
+            else:
+                yield None
                 await self.checkin()
-        else:
-            await self.checkin()
-            yield None
 
     async def create(self) -> AbstractConnection:
         """Establishes the connection or reuses existing if already created."""
@@ -395,6 +398,11 @@ class SharedTransportConnection:
                     self._ready.set()
                 else:
                     raise ConnectionFailed("Failed readying connection")
+
+    @property
+    def should_close(self) -> bool:
+        """Check if connection should be closed"""
+        return self._should_close
 
     async def close(self) -> None:
         """Closes the connection"""
@@ -488,10 +496,11 @@ class ConnectionPool:
         now = time.monotonic()
         conn_check_n = (self.max_size // 2) + 1
         while not connection_reached and total_time < timeout:
-            for _conn in heapq.nsmallest(conn_check_n, self._pool):
-                if _conn.available:
-                    async with _conn.acquire(timeout=acquire_timeout) as conn:
-                        if conn is not None:
+            for shareable_conn in heapq.nsmallest(conn_check_n, self._pool):
+                if shareable_conn.available:
+                    async with shareable_conn.acquire(timeout=acquire_timeout) as conn:
+                        # Do not yield connections that should be closed
+                        if conn is not None and not shareable_conn.should_close:
                             yield conn
                             connection_reached = True
                             break
@@ -499,6 +508,10 @@ class ConnectionPool:
             await anyio.sleep(0.01)
             latest = time.monotonic()
             total_time += latest - now
+
+        for shareable_conn in self._pool:
+            if shareable_conn.should_close:
+                await shareable_conn.close()
 
         if connection_reached:
             heapq.heapify(self._pool)
