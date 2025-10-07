@@ -111,5 +111,4 @@ venv.bak/
 
 #misc
 .DS_Store
-
-settings.json
+tmp/

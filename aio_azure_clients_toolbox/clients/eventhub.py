@@ -216,7 +216,10 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
         )
+        if not isinstance(ready_message, (str, bytes)):
+            raise ValueError("ready_message must be a string or bytes")
         self.ready_message = ready_message
+
         self.pool_kwargs = {
             "timeout": pool_get_timeout,
             "acquire_timeout": pool_connection_create_timeout,
