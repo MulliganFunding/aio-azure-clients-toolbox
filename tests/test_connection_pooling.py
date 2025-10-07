@@ -1,4 +1,6 @@
 import asyncio
+import heapq
+import logging
 from collections import defaultdict
 
 import pytest
@@ -398,11 +400,8 @@ async def test_race_condition_shared_connection_closed_while_in_use():
         tg.start_soon(checkouter, 1)
         tg.start_soon(checkouter, 2)
 
-    # Now expire the connection
-    # This simulates what happens when the first client finishes and lifespan is exceeded
-    if shared_conn.current_client_count == 1 and shared_conn.expired:
-        # Manually trigger the close that happens in checkin
-        await shared_conn.close()
+    # Sanity check: we should have only one connection object
+    assert shared_conn.current_client_count <= 1 and shared_conn.expired
 
     # Now the second client tries to use the same connection object:
     # Before the bug fix, this raises AttributeError.
@@ -589,8 +588,6 @@ async def test_regression_pool_heap_ordering():
 
     # Pool should maintain heap ordering (freshest connections first)
     # This is verified by the internal heap structure
-    import heapq
-
     assert len(pool._pool) == 3
     # Heap property should be maintained
     heap_copy = pool._pool.copy()
@@ -617,8 +614,6 @@ async def test_send_time_deco_basic():
 
 async def test_send_time_deco_with_custom_message(caplog):
     """Test send_time_deco with custom message logs timing information"""
-    import logging
-
     # Set up logging to capture debug messages
     caplog.set_level(
         logging.DEBUG, logger="aio_azure_clients_toolbox.connection_pooling"
@@ -643,7 +638,6 @@ async def test_send_time_deco_with_custom_message(caplog):
 
 async def test_send_time_deco_with_custom_logger(caplog):
     """Test send_time_deco with custom logger"""
-    import logging
 
     # Create a custom logger
     custom_logger = logging.getLogger("test_custom_logger")
