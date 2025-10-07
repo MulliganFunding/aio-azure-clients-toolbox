@@ -159,6 +159,7 @@ class SharedTransportConnection:
         "_open_close_lock",
         "_id",
         "_ready",
+        "_should_close",
     )
 
     def __init__(
@@ -184,6 +185,8 @@ class SharedTransportConnection:
         self.max_idle_ns = max_idle_seconds * NANO_TIME_MULT
         # How many clients are allowed
         self.client_limiter = anyio.CapacityLimiter(total_tokens=client_limit)
+        # Is the connection ready to close
+        self._should_close = False
 
         self._connector: AbstractorConnector = connector
         self._connection: AbstractConnection | None = None
@@ -286,8 +289,8 @@ class SharedTransportConnection:
         # Bookkeeping: we want to know how long it takes to acquire a connection
         now = time.monotonic_ns()
 
-        # # We use a semaphore to manage client limits
-        # await self.client_limiter.acquire()
+        # We use a semaphore to manage client limits
+        await self.client_limiter.acquire()
 
         if self.expired and self.current_client_count == 1:
             logger.debug(f"{self} Retiring Connection past its lifespan")
@@ -320,23 +323,21 @@ class SharedTransportConnection:
     async def checkin(self):
         """Called after a connection has been used"""
         # Release the client limit semaphore!
-        # try:
-        #     self.client_limiter.release()
-        # except RuntimeError:
-        #     pass
+        try:
+            self.client_limiter.release()
+        except RuntimeError:
+            pass
 
         logger.debug(f"{self}.current_client_count is now {self.current_client_count}")
 
-        # we only consider idle time to start when *the last* client checks in
-        if self.current_client_count == 1:
+        # we only consider idle time to start when *no* clients are connected
+        if self.current_client_count == 0:
             logger.debug(f"{self} is now idle")
             self.last_idle_start = time.monotonic_ns()
 
-            # # Check if TTL exceeded for this connection
-            # if self.max_lifespan_ns is not None and self.expired:
-            #     # Mark for closure, but don't close yet
-            #     self._should_close_after_release = True
-            #     # await self.close()
+            # Check if TTL exceeded for this connection
+            if self.max_lifespan_ns is not None and self.expired:
+                self._should_close = True
 
     @asynccontextmanager
     async def acquire(
@@ -344,38 +345,24 @@ class SharedTransportConnection:
     ) -> AsyncGenerator[AbstractConnection | None, None]:
         """Acquire a connection with a timeout"""
         acquired_conn = None
-        should_close_after = False
-        # Acquire semaphore and release on exit
-        # This also counts the number of clients using this connection.
-        async with self.client_limiter:
-            acquired_conn = None
-            async with create_task_group():
-                with move_on_after(timeout) as scope:
-                    acquired_conn = await self.checkout()
+        async with create_task_group():
+            with move_on_after(timeout) as scope:
+                acquired_conn = await self.checkout()
 
-            # If this were nested under `create_task_group` then any exceptions
-            # get thrown under `BaseExceptionGroup`, which is surprising for clients.
-            # See: https://github.com/agronholm/anyio/issues/141
-            if not scope.cancelled_caught and acquired_conn:
-                try:
-                    yield acquired_conn
-                finally:
-                    # Check if we should close BEFORE releasing semaphore
-                    if (
-                        self.current_client_count == 1
-                        and self.max_lifespan_ns is not None
-                        and self.expired
-                    ):
-                        should_close_after = True
-            else:
-                yield None
-
-            # Set last-idle time after releasing semaphore
+        # If this were nested under `create_task_group` then any exceptions
+        # get thrown under `BaseExceptionGroup`, which is surprising for clients.
+        # See: https://github.com/agronholm/anyio/issues/141
+        if not scope.cancelled_caught and acquired_conn:
+            try:
+                yield acquired_conn
+            finally:
+                await self.checkin()
+        else:
             await self.checkin()
+            yield None
 
-            # Semaphore is released here, NOW we can safely close
-            if should_close_after:
-                await self.close()
+        if self._should_close:
+            await self.close()
 
     async def create(self) -> AbstractConnection:
         """Establishes the connection or reuses existing if already created."""
@@ -508,8 +495,8 @@ class ConnectionPool:
                 if _conn.available:
                     async with _conn.acquire(timeout=acquire_timeout) as conn:
                         if conn is not None:
-                            connection_reached = True
                             yield conn
+                            connection_reached = True
                             break
             # Arbitrary async yield to avoid busy loop
             await anyio.sleep(0.01)
