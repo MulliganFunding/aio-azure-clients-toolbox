@@ -149,8 +149,6 @@ async def test_upload_blob(with_error, absc, mock_azureblob):
 
 
 async def test_list_blobs(absc, mock_azureblob):
-    # We don't have a specific implementation of this method, but we need to make sure
-    # our pytest fixture for it works.
     container_client, _, set_return = mock_azureblob
     set_return.list_blobs_returns([
         BlobProperties(name="some-blob", last_modified="2023-01-01T00:00:00Z"),
@@ -158,6 +156,6 @@ async def test_list_blobs(absc, mock_azureblob):
         BlobProperties(name="some-blob3", last_modified="2023-01-01T00:00:00Z"),
     ])
 
-    blob_names = [b.name async for b in container_client.list_blobs()]
+    blob_names = [b.name async for b in absc.list_blobs()]
     assert len(blob_names) == 3
     assert blob_names == ["some-blob", "some-blob2", "some-blob3"]
