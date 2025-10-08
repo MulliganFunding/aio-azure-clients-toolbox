@@ -2,6 +2,14 @@
 
 API documentation for Azure service clients.
 
+## Types
+
+::: aio_azure_clients_toolbox.clients.types
+    options:
+      show_root_heading: true
+      show_source: true
+      heading_level: 3
+
 ## Azure Blob Storage
 
 ::: aio_azure_clients_toolbox.clients.azure_blobs

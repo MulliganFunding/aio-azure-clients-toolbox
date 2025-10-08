@@ -21,7 +21,7 @@ ManagedCosmos(
     endpoint: str,
     dbname: str,
     container_name: str,
-    credential: DefaultAzureCredential,
+    credential_factory: CredentialFactory,
     client_limit: int = 100,
     max_size: int = 10,
     max_idle_seconds: int = 30,
@@ -36,7 +36,7 @@ ManagedCosmos(
 - **endpoint**: Cosmos DB account endpoint URL
 - **dbname**: Target database name
 - **container_name**: Target container name
-- **credential**: Azure authentication credential
+- **credential_factory**: Factory function that returns Azure authentication credentials
 - **client_limit**: Maximum clients per pooled connection (default: 100)
 - **max_size**: Connection pool size (default: 10)
 - **max_idle_seconds**: Connection idle timeout (default: 30)
@@ -55,7 +55,7 @@ cosmos = ManagedCosmos(
     endpoint="https://your-account.documents.azure.com:443/",
     dbname="your-database",
     container_name="your-container",
-    credential=DefaultAzureCredential()
+    credential_factory=lambda: DefaultAzureCredential()
 )
 
 # Document operations

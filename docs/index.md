@@ -73,7 +73,7 @@ cosmos_client = ManagedCosmos(
     endpoint="https://your-cosmos.documents.azure.com:443/",
     dbname="your-database",
     container_name="your-container",
-    credential=DefaultAzureCredential(),
+    credential_factory=lambda: DefaultAzureCredential(),
 
     # Pool configuration
     client_limit=100,      # Concurrent clients per connection

@@ -19,7 +19,7 @@ Recommended client with connection pooling for high-throughput sending.
 ManagedAzureServiceBusSender(
     service_bus_namespace_url: str,
     service_bus_queue_name: str,
-    credential: DefaultAzureCredential,
+    credential_factory: CredentialFactory,
     client_limit: int = 100,
     max_size: int = 10,
     max_idle_seconds: int = 300,
@@ -33,7 +33,7 @@ ManagedAzureServiceBusSender(
 
 - **service_bus_namespace_url**: Service Bus namespace URL
 - **service_bus_queue_name**: Target queue name
-- **credential**: Azure authentication credential
+- **credential_factory**: Factory function that returns Azure authentication credentials
 - **client_limit**: Maximum clients per pooled connection
 - **max_size**: Connection pool size
 - **max_idle_seconds**: Connection idle timeout
@@ -75,7 +75,7 @@ from aio_azure_clients_toolbox import ManagedAzureServiceBusSender
 sender = ManagedAzureServiceBusSender(
     service_bus_namespace_url="https://your-namespace.servicebus.windows.net",
     service_bus_queue_name="your-queue",
-    credential=DefaultAzureCredential()
+    credential_factory=lambda: DefaultAzureCredential()
 )
 
 # Send simple message
