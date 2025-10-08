@@ -144,7 +144,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
       ready_message:
-        A string representing the first "ready" message sent to establish connection.
+        A string or bytes representing the first "ready" message sent to establish connection.
     """
 
     def __init__(
@@ -156,7 +156,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
         max_lifespan_seconds: int | None = None,
-        ready_message: str = "Connection established",
+        ready_message: str | bytes = "Connection established",
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
     ):
@@ -166,6 +166,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             raise ValueError(
                 "credential_factory must be a callable returning a credential"
             )
+
         self.credential_factory = credential_factory
 
         self.pool = connection_pooling.ConnectionPool(
@@ -175,7 +176,10 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
         )
+        if not isinstance(ready_message, (str, bytes)):
+            raise ValueError("ready_message must be a string or bytes")
         self.ready_message = ready_message
+
         self.pool_kwargs = {
             "timeout": pool_get_timeout,
             "acquire_timeout": pool_connection_create_timeout,

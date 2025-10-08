@@ -2,10 +2,8 @@
 name = "aio-azure-clients-toolbox"
 version = "1.0.0"
 description = "Async Azure Clients Mulligan Python projects"
-authors = [
-    { "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" },
-]
-license = {file = "LICENSE"}
+authors = [{ "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" }]
+license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -57,12 +55,8 @@ pythonpath = "."
 asyncio_mode = "auto"
 xfail_strict = true
 addopts = "--cov-report term:skip-covered --cov=aio_azure_clients_toolbox --strict-config --strict-markers --cov-report html"
-testpaths = [
-    "tests",
-]
-filterwarnings = [
-    "error"
-]
+testpaths = ["tests"]
+filterwarnings = ["error"]
 
 [tool.ruff]
 src = ["aio_azure_clients_toolbox", "tests"]
@@ -76,13 +70,13 @@ select = [
     "B",  # flake8-bugbear
     "E",  # pycodestyle error
     "F",  # pyflakes
-    "FA",  # flake8-future-annotations
+    "FA", # flake8-future-annotations
     "I",  # isort
     "N",  # pep8-naming
-    "UP",  # pyupgrade
+    "UP", # pyupgrade
     "W",  # pycodestyle warning
 ]
-ignore = ["N818", "N805"]  # exception naming
+ignore = ["N818", "N805"] # exception naming
 
 [tool.ruff.lint.isort]
 force-single-line = false
