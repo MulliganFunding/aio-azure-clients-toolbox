@@ -3,12 +3,13 @@ import os
 import re
 import typing
 import urllib.parse
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import aiofiles
 from azure.core.exceptions import HttpResponseError
 from azure.identity.aio import DefaultAzureCredential
-from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+from azure.storage.blob import BlobProperties, BlobSasPermissions, generate_blob_sas
 from azure.storage.blob.aio import BlobClient, BlobServiceClient
 
 # These limits are inclusive; names must not exceed these counts
@@ -161,6 +162,24 @@ class AzureBlobStorageClient:
                     # `chunk` is a byte array
                     await fl.write(chunk)
         return save_path
+
+    async def list_blobs(
+        self, prefix: str | None = None, **kwargs
+    ) -> AsyncGenerator[BlobProperties]:
+        """List blobs in the container: convenience wrapper around ContainerClient.list_blobs.
+        Args:
+            prefix (Optional[str]): The prefix to filter blobs.
+        Returns:
+            AsyncGenerator[BlobProperties]: A generator of blob properties.
+        """
+        async with self.get_blob_service_client() as blob_service_client:
+            container_client = blob_service_client.get_container_client(
+                self.container_name
+            )
+            async for blob in container_client.list_blobs(
+                name_starts_with=prefix, **kwargs
+            ):
+                yield blob
 
     async def upload_blob(
         self,
