@@ -24,7 +24,7 @@ Provides a configured `AzureBlobStorageClient` instance for testing.
 
 Mocks Azure Blob Storage operations.
 
-**Returns**: `(mock_service, mock_blob_client, set_return_function)`
+**Returns**: `(container_client, mock_blob_client, set_return_function)`
 
 #### `mocksas`
 
@@ -53,7 +53,7 @@ Provides a fake Service Bus client for testing message operations.
 ```python
 # Test blob upload
 async def test_upload_blob(absc, mock_azureblob):
-    _, mock_blob_client, set_return = mock_azureblob
+    container_client, mock_blob_client, set_return = mock_azureblob
 
     # Configure mock response
     set_return.upload_blob_returns("mock-response")
@@ -67,7 +67,7 @@ async def test_upload_blob(absc, mock_azureblob):
 
 # Test blob download
 async def test_download_blob(absc, mock_azureblob):
-    _, _, set_return = mock_azureblob
+    container_client, mock_blob_client, set_return = mock_azureblob
 
     # Mock download response
     set_return.download_blob_returns(b"file content")
@@ -77,11 +77,28 @@ async def test_download_blob(absc, mock_azureblob):
 
     assert content == b"file content"
 
+# Test blob listing
+async def test_list_blobs(absc, mock_azureblob):
+    container_client, mock_blob_client, set_return = mock_azureblob
+
+    # Mock list response
+    mock_blobs = [
+        BlobProperties(name="file1.txt", size=100),
+        BlobProperties(name="file2.txt", size=200),
+    ]
+    set_return.list_blobs_returns(mock_blobs)
+
+    # Test listing
+    blobs = [blob async for blob in absc.list_blobs()]
+
+    assert len(blobs) == 2
+    assert blobs[0].name == "file1.txt"
+
 # Test SAS token generation
 async def test_get_blob_sas_token(absc, mock_azureblob, mocksas):
     mockgen, fake_token = mocksas
-    _, mockblobc, _ = mock_azureblob
-    mockblobc.account_name = "teststorage"
+    container_client, mock_blob_client, _ = mock_azureblob
+    mock_blob_client.account_name = "teststorage"
 
     # Test token generation
     result = await absc.get_blob_sas_token("test.txt")
@@ -243,6 +260,13 @@ def conditional_response(item):
     return {"id": item["id"], "status": "created"}
 
 set_return.create_item_side_effect(conditional_response)
+
+# For blob storage operations
+set_return.download_blob_returns(b"mock file content")
+set_return.list_blobs_returns([
+    BlobProperties(name="file1.txt", size=100),
+    BlobProperties(name="file2.txt", size=200)
+])
 ```
 
 ### Verifying Mock Calls

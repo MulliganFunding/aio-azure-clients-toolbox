@@ -31,6 +31,50 @@ Additional dependencies for connection pooling and async operations:
 
 ## Azure Authentication Setup
 
+### Managed Clients (Connection Pooling)
+
+Managed clients (those with connection pooling such as `ManagedCosmos`, `ManagedAzureEventhubProducer`, `ManagedAzureServiceBusSender`) now require a **CredentialFactory** instead of a direct credential instance. This is a callable that returns a new credential instance when needed:
+
+```python
+from azure.identity.aio import DefaultAzureCredential
+from aio_azure_clients_toolbox import ManagedCosmos
+
+# Use a lambda function that returns a new credential
+cosmos_client = ManagedCosmos(
+    endpoint="https://your-account.documents.azure.com:443/",
+    dbname="your-database",
+    container_name="your-container",
+    credential_factory=lambda: DefaultAzureCredential()
+)
+
+# Or define a function
+def get_credential():
+    return DefaultAzureCredential()
+
+cosmos_client = ManagedCosmos(
+    endpoint="https://your-account.documents.azure.com:443/",
+    dbname="your-database",
+    container_name="your-container",
+    credential_factory=get_credential
+)
+```
+
+### Basic Clients
+
+Basic clients (non-managed) continue to use `DefaultAzureCredential` directly:
+
+```python
+from aio_azure_clients_toolbox import AzureBlobStorageClient
+
+blob_client = AzureBlobStorageClient(
+    az_storage_url="https://your-storage.blob.core.windows.net",
+    container_name="your-container",
+    credentials=DefaultAzureCredential()  # Direct credential instance
+)
+```
+
+### Authentication Methods
+
 This library uses `DefaultAzureCredential` which attempts authentication methods in the following order:
 
 1. **Environment Variables**: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`

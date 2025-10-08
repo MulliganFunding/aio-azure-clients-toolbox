@@ -19,7 +19,7 @@ Recommended client with connection pooling for high-throughput event streaming.
 ManagedAzureEventhubProducer(
     eventhub_namespace: str,
     eventhub_name: str,
-    credential: DefaultAzureCredential,
+    credential_factory: CredentialFactory,
     eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
     client_limit: int = 100,
     max_size: int = 10,
@@ -35,7 +35,7 @@ ManagedAzureEventhubProducer(
 
 - **eventhub_namespace**: Event Hub namespace (without .servicebus.windows.net)
 - **eventhub_name**: Target Event Hub name
-- **credential**: Azure authentication credential
+- **credential_factory**: Factory function that returns Azure authentication credentials
 - **eventhub_transport_type**: Transport protocol (default: AMQP)
 - **client_limit**: Maximum clients per pooled connection
 - **max_size**: Connection pool size
@@ -72,7 +72,7 @@ import json
 producer = ManagedAzureEventhubProducer(
     eventhub_namespace="your-namespace",
     eventhub_name="your-eventhub",
-    credential=DefaultAzureCredential(),
+    credential_factory=lambda: DefaultAzureCredential(),
     ready_message='{"eventType": "connection-established"}'
 )
 

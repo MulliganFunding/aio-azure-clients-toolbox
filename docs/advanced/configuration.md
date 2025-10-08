@@ -13,7 +13,7 @@ client = ManagedCosmos(
     endpoint="https://cosmos.documents.azure.com/",
     dbname="database",
     container_name="container",
-    credential=credential,
+    credential_factory=credential_factory,
     # Connection pool settings
     client_limit=100,           # Clients per connection
     max_size=10,                # Pool size

@@ -63,6 +63,17 @@ async def delete_blob(blob_name: str) -> None
 
 Delete blob from storage.
 
+#### list_blobs
+
+```python
+async def list_blobs(
+    prefix: str | None = None,
+    **kwargs
+) -> AsyncGenerator[BlobProperties]
+```
+
+List blobs in the container with optional prefix filtering.
+
 #### get_blob_sas_token
 
 ```python
@@ -118,6 +129,14 @@ file_path = await blob_client.download_blob_to_dir(
 
 # Delete file
 await blob_client.delete_blob("documents/document.pdf")
+
+# List all blobs
+async for blob in blob_client.list_blobs():
+    print(f"Blob: {blob.name}, Size: {blob.size}")
+
+# List blobs with prefix
+async for blob in blob_client.list_blobs(prefix="documents/"):
+    print(f"Document: {blob.name}")
 ```
 
 ### SAS Token Generation
