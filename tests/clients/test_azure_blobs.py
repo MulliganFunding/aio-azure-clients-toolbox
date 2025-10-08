@@ -129,7 +129,6 @@ async def test_upload_blob(with_error, absc, mock_azureblob):
         mockblobc.upload_blob.assert_called_once_with("somedata", blob_type="BlockBlob")
     else:
         expected = {"status": "success"}
-        mockblobc.upload_blob.side_effect = None
         mockblobc.upload_blob.return_value = expected
         result1 = await absc.upload_blob("hey", "somedata")
         assert result1[0] is True

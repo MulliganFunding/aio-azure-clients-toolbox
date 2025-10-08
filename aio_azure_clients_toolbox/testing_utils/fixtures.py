@@ -6,7 +6,7 @@ from azure.eventgrid import EventGridPublisherClient
 from azure.eventgrid.aio import EventGridPublisherClient as AsyncEventGridPublisherClient
 from azure.eventhub.aio import EventHubProducerClient
 from azure.servicebus.aio import ServiceBusClient
-from azure.storage.blob.aio import BlobClient
+from azure.storage.blob.aio import BlobClient, BlobServiceClient, ContainerClient
 
 from aio_azure_clients_toolbox import clients
 
@@ -21,6 +21,10 @@ def make_async_ctx_mgr(mock_thing):
     something = mock_thing
 
     class WithAsyncContextManager:
+
+        def __call__(self, *args, **kwds):
+            return self
+
         def __getattr__(self, key):
             return getattr(something, key)
 
@@ -77,19 +81,22 @@ def mocksas():
 
 @pytest.fixture(autouse=True)
 async def mock_azureblob(monkeypatch):  # type: ignore
-    """Mock out Azure Blob Service client"""
+    """Mock out Azure Blob Service client and its children."""
+    bsc = mock.MagicMock(BlobServiceClient)
+    container_client = mock.MagicMock(ContainerClient)
     mockblobc = mock.MagicMock(BlobClient)
-    # Parent: also, container client, delivers a blob client
-    inner_client = mock.Mock()
-    mockbsc = mock.Mock(return_value=make_async_ctx_mgr(inner_client))
-    inner_client.get_container_client = mock.Mock(return_value=make_async_ctx_mgr(inner_client))
-    inner_client.get_blob_client = mock.PropertyMock(return_value=mockblobc)
-    inner_client.delete_blobs = mock.AsyncMock()
-    monkeypatch.setattr(clients.azure_blobs, "BlobServiceClient", mockbsc)
-    inner_client.get_user_delegation_key = mock.AsyncMock()
-    mockblobc.upload_blob_from_url = mock.AsyncMock()
-    mockblobc.upload_blob = mock.AsyncMock()
-    mockblobc.delete_blob = mock.AsyncMock()
+
+    # Parent: gets container client, delivers a blob client
+    # Used for get-lease: overwrite if needed
+    bsc.account_name = "our-company-blobs"
+    bsc.get_container_client = mock.Mock(return_value=container_client)
+    bsc.get_blob_client = mock.PropertyMock(return_value=mockblobc)
+    container_client.get_blob_client = mock.PropertyMock(return_value=mockblobc)
+
+    # Setattr the parent for this codebase
+    monkeypatch.setattr(
+        clients.azure_blobs, "BlobServiceClient", make_async_ctx_mgr(bsc)
+    )
 
     def set_download_return(return_value, side_effect=None):
         """
@@ -121,14 +128,14 @@ async def mock_azureblob(monkeypatch):  # type: ignore
         # For `async for` with `list_blobs`
         async_lister = AsyncIterImplementation()
         async_lister.side_effect = list_or_side_effect
-        inner_client.list_blobs.return_value = async_lister
+        container_client.list_blobs.return_value = async_lister
 
     class SetReturns:
         def __init__(self):
             self.download_blob_returns = set_download_return
             self.list_blobs_returns = set_list_blobs_return
 
-    return inner_client, mockblobc, SetReturns()
+    return container_client, mockblobc, SetReturns()
 
 
 @pytest.fixture()
