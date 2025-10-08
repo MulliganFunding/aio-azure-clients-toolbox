@@ -45,8 +45,6 @@ class AsyncIterImplementation:
     async def _call__(self):
         if self.side_effect and isinstance(self.side, Exception):
             raise self.side_effect
-        if self.side_effect is not None and isinstance(self.side_effect, Exception):
-            raise self.side_effect
         if hasattr(self.side_effect, "__iter__"):
             self._is_iter = iter(self.side_effect)
 
@@ -95,21 +93,29 @@ async def mock_azureblob(monkeypatch):  # type: ignore
 
     def set_download_return(return_value, side_effect=None):
         """
-        Set the return value for the download_blob method and list_blobs method.
+        Set the return value for the download_blob method.
         """
         # For `async for` with `download_blob`
         async_downloader = AsyncIterImplementation()
         async_downloader.return_value = return_value
-        if side_effect is not None:
-            async_downloader.side_effect = side_effect
 
-        chunks_thing = mock.Mock(
-            **{
-                "readall": mock.AsyncMock(return_value=return_value),
-                "chunks.return_value": async_downloader,
-            }
-        )
+        def make_chunks(value):
+            return mock.Mock(
+                **{
+                    "readall": mock.AsyncMock(return_value=value),
+                    "chunks.return_value": async_downloader,
+                }
+            )
+
+        chunks_thing = make_chunks(return_value)
         mockblobc.download_blob.return_value = chunks_thing
+
+        # hack download_blob to return different things on each call
+        if side_effect is not None and isinstance(side_effect, list):
+            all_chunks = [make_chunks(v) for v in side_effect]
+            mockblobc.download_blob.side_effect = all_chunks
+        elif side_effect is not None:
+            async_downloader.side_effect = side_effect
 
     def set_list_blobs_return(list_or_side_effect):
         # For `async for` with `list_blobs`
