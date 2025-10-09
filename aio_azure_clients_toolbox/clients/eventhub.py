@@ -169,8 +169,8 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         String representing the Eventhub namespace.
       eventhub_name:
         Eventhub name (the "topic").
-      credential:
-        An async DefaultAzureCredential which may be used to authenticate to the container.
+      credential_factory:
+        A callable that returns an async DefaultAzureCredential which may be used to authenticate to the container.
       client_limit:
         Client limit per connection (default: 100).
       max_size:

@@ -129,8 +129,8 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         String representing the ServiceBus namespace URL.
       service_bus_queue_name:
         Queue name (the "topic").
-      credential:
-        An async DefaultAzureCredential which may be used to authenticate to the container.
+      credential_factory:
+        A callable that returns an async DefaultAzureCredential which may be used to authenticate to the container.
       client_limit:
         Client limit per connection (default: 100).
       max_size:

@@ -276,8 +276,8 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         Cosmos database name.
       container_name:
         Cosmos container name.
-      credential:
-        An async DefaultAzureCredential which may be used to authenticate to the container.
+      credential_factory:
+        A callable that returns an async DefaultAzureCredential which may be used to authenticate to the container.
       client_limit:
         Client limit per connection (default: 100).
       max_size:
