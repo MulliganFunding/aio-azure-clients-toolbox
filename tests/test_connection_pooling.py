@@ -256,9 +256,7 @@ async def test_connection_pool_close(pool):
 async def test_pool_acquire_timeouts(slow_pool):
     """Check that acquire with timeout moves on sucessfully"""
     with pytest.raises(cp.ConnectionsExhausted):
-        async with slow_pool.get(
-            timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS
-        ) as conn:
+        async with slow_pool.get(timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS) as conn:
             assert conn is None
 
 
@@ -359,6 +357,7 @@ class CosmosLikeConnector(cp.AbstractorConnector):
     """Connector that creates cosmos-like connections"""
 
     def __init__(self):
+        self.is_closed = False
         self.created_connections = []
 
     async def create(self) -> cp.AbstractConnection:
@@ -368,6 +367,9 @@ class CosmosLikeConnector(cp.AbstractorConnector):
 
     async def ready(self, connection: cp.AbstractConnection) -> bool:
         return True
+
+    async def close(self):
+        self.is_closed = True
 
 
 async def test_race_condition_shared_connection_closed_while_in_use():
@@ -447,7 +449,7 @@ async def test_race_condition_pool_connection_lifecycle():
     async def client_1():
         async with pool.get() as conn:
             references.append(conn)  # Store reference
-            await sleep(0.04)  # Exceed lifespan, connection will be closed in checkin
+            await sleep(0.04)  # Exceed lifespan, connection will be mark should_close
             client1_event.set()
 
         await client2_event.wait()
@@ -464,7 +466,7 @@ async def test_race_condition_pool_connection_lifecycle():
 
         # Now try to use it - should fail if race condition exists
         conn.use_container()
-        await sleep(0.04)  # Exceed lifespan, connection will be closed in checkin
+        await sleep(0.04)  # Exceed lifespan, connection will be mark should_close
         client2_event.set()
 
     # Run both clients
@@ -476,9 +478,53 @@ async def test_race_condition_pool_connection_lifecycle():
         for exc in excgroup.exceptions:
             if "Container client not constructed" in str(exc):
                 # Race condition successfully triggered!
-                pytest.fail(
-                    "Race condition detected - one client used a closed connection"
-                )
+                pytest.fail("Race condition detected - one client used a closed connection")
+            else:
+                raise
+
+
+async def test_pool_connection_closes_safely():
+    """
+    Pool-level race condition test that tries to close a connection while another client is using it.
+    """
+    connector = CosmosLikeConnector()
+    pool = cp.ConnectionPool(
+        connector,
+        client_limit=3,
+        max_size=2,
+        max_idle_seconds=0.001,
+        max_lifespan_seconds=0.002,
+    )
+
+    # Hold references to connection objects
+    references = []
+
+    async def client_1():
+        async with pool.get() as conn:
+            references.append(conn)  # Store reference
+            await sleep(0.004)  # Exceed lifespan, connection will be mark should_close
+
+    async def client_2():
+        await sleep(0.01)  # Start after above clients
+        async with pool.get() as conn:
+            # This client should get a new connection, not the old one
+            assert conn is not references[0], "Should get a new connection object"
+            conn.use_container()  # Should work fine
+            await sleep(0.01)
+
+        # Should close other connection outside of context mgr!
+        assert references[0].is_closed
+
+    # Run both clients
+    try:
+        async with create_task_group() as tg:
+            tg.start_soon(client_1)
+            tg.start_soon(client_2)
+    except* AttributeError as excgroup:
+        for exc in excgroup.exceptions:
+            if "Container client not constructed" in str(exc):
+                # Race condition successfully triggered!
+                pytest.fail("Race condition detected - one client used a closed connection")
             else:
                 raise
 

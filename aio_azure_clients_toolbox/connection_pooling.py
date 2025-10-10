@@ -397,6 +397,11 @@ class SharedTransportConnection:
         """Check if connection should be closed"""
         return self._should_close
 
+    @property
+    def closeable(self) -> bool:
+        """Check if connection *can* be closed (no clients using it)"""
+        return self.should_close and self.current_client_count == 0
+
     async def close(self) -> None:
         """Closes the connection"""
         if self._connection is None:
@@ -499,7 +504,7 @@ class ConnectionPool:
                             yield conn
                             connection_reached = True
                             break
-                elif shareable_conn.should_close:
+                elif shareable_conn.closeable:
                     logger.debug(f"{shareable_conn} Connection expired during acquire")
                     await shareable_conn.close()
 
