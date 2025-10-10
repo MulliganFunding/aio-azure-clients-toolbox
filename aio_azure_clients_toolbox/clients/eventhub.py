@@ -184,7 +184,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
       ready_message:
-        A string representing the first "ready" message sent to establish connection.
+        A string, bytes, or EventData object representing the first "ready" message sent to establish connection.
     """
 
     def __init__(
@@ -196,7 +196,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = EVENTHUB_SEND_TTL_SECONDS,
-        ready_message: str = "Connection established",
+        ready_message: str | bytes | EventData = "Connection established",
         max_lifespan_seconds: int | None = None,
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
@@ -216,8 +216,8 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
         )
-        if not isinstance(ready_message, (str, bytes)):
-            raise ValueError("ready_message must be a string or bytes")
+        if not isinstance(ready_message, (str, bytes, EventData)):
+            raise ValueError("ready_message must be a string, bytes, or EventData")
         self.ready_message = ready_message
 
         self.pool_kwargs = {
@@ -244,7 +244,10 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         # Create a batch.
         event_data_batch: EventDataBatch = await conn.create_batch()
         # Prepare ready message as an event
-        event_data_batch.add(EventData(self.ready_message))
+        if isinstance(self.ready_message, EventData):
+            event_data_batch.add(self.ready_message)
+        else:
+            event_data_batch.add(EventData(self.ready_message))
         attempts = 2
 
         while attempts > 0:
