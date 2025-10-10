@@ -54,7 +54,7 @@ minversion = "8.3"
 pythonpath = "."
 asyncio_mode = "auto"
 xfail_strict = true
-addopts = "--cov-report term:skip-covered --cov=aio_azure_clients_toolbox --strict-config --strict-markers --cov-report html"
+addopts = "--cov-report=term-missing:skip-covered --cov=aio_azure_clients_toolbox --strict-config --strict-markers --cov-report html"
 testpaths = ["tests"]
 filterwarnings = ["error"]
 
