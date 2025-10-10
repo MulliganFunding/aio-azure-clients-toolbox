@@ -449,7 +449,7 @@ async def test_race_condition_pool_connection_lifecycle():
     async def client_1():
         async with pool.get() as conn:
             references.append(conn)  # Store reference
-            await sleep(0.04)  # Exceed lifespan, connection will be mark should_close
+            await sleep(0.04)  # Exceed lifespan, connection will be marked should_close
             client1_event.set()
 
         await client2_event.wait()
@@ -466,7 +466,7 @@ async def test_race_condition_pool_connection_lifecycle():
 
         # Now try to use it - should fail if race condition exists
         conn.use_container()
-        await sleep(0.04)  # Exceed lifespan, connection will be mark should_close
+        await sleep(0.04)  # Exceed lifespan, connection will be marked should_close
         client2_event.set()
 
     # Run both clients
@@ -502,7 +502,7 @@ async def test_pool_connection_closes_safely():
     async def client_1():
         async with pool.get() as conn:
             references.append(conn)  # Store reference
-            await sleep(0.004)  # Exceed lifespan, connection will be mark should_close
+            await sleep(0.004)  # Exceed lifespan, connection will be marked should_close
 
     async def client_2():
         await sleep(0.01)  # Start after above clients
