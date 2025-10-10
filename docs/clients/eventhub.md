@@ -4,9 +4,9 @@ Azure Event Hub clients for event streaming with connection pooling support.
 
 ## Available Classes
 
-| Class | Type | Description |
-|-------|------|-------------|
-| `Eventhub` | Basic | Direct Event Hub operations |
+| Class                          | Type    | Description                      |
+| ------------------------------ | ------- | -------------------------------- |
+| `Eventhub`                     | Basic   | Direct Event Hub operations      |
 | `ManagedAzureEventhubProducer` | Managed | Connection pooling for producers |
 
 ## ManagedAzureEventhubProducer
@@ -25,7 +25,7 @@ ManagedAzureEventhubProducer(
     max_size: int = 10,
     max_idle_seconds: int = 300,
     max_lifespan_seconds: int = None,
-    ready_message: str = None,
+    ready_message: str | bytes | EventData = None,
     pool_connection_create_timeout: int = 10,
     pool_get_timeout: int = 60
 )
@@ -41,7 +41,7 @@ ManagedAzureEventhubProducer(
 - **max_size**: Connection pool size
 - **max_idle_seconds**: Connection idle timeout
 - **max_lifespan_seconds**: Maximum connection lifetime
-- **ready_message**: Message sent to validate connection readiness
+- **ready_message**: Message sent to validate connection readiness (accepts str, bytes, or EventData)
 - **pool_connection_create_timeout**: Timeout for creating connections in the pool (default: 10 seconds)
 - **pool_get_timeout**: Timeout for acquiring connections from the pool (default: 60 seconds)
 
@@ -92,6 +92,40 @@ await producer.send_event(json.dumps(event_data))
 await producer.send_event(
     json.dumps(event_data),
     partition_key="user-12345"
+)
+```
+
+### Ready Message Configuration
+
+The `ready_message` parameter accepts multiple types for connection validation:
+
+```python
+from azure.eventhub import EventData
+
+# String ready message (default)
+producer = ManagedAzureEventhubProducer(
+    eventhub_namespace="your-namespace",
+    eventhub_name="your-eventhub",
+    credential_factory=lambda: DefaultAzureCredential(),
+    ready_message='{"type": "connection_test"}'
+)
+
+# Bytes ready message
+producer = ManagedAzureEventhubProducer(
+    eventhub_namespace="your-namespace",
+    eventhub_name="your-eventhub",
+    credential_factory=lambda: DefaultAzureCredential(),
+    ready_message=b'{"type": "connection_test"}'
+)
+
+# EventData ready message with properties
+ready_event = EventData('{"type": "connection_test"}')
+
+producer = ManagedAzureEventhubProducer(
+    eventhub_namespace="your-namespace",
+    eventhub_name="your-eventhub",
+    credential_factory=lambda: DefaultAzureCredential(),
+    ready_message=ready_event
 )
 ```
 

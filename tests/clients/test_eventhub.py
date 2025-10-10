@@ -28,6 +28,61 @@ def managed_ehub(mockehub):
     )
 
 
+@pytest.mark.parametrize(
+    "bad_ready_message",
+    [
+        123,
+        45.67,
+        {"key": "value"},
+        ["list", "of", "strings"],
+        (1, 2, 3),
+        None,
+    ],
+)
+def test_bad_ready_message(bad_ready_message):
+    with pytest.raises(ValueError):
+        eventhub.ManagedAzureEventhubProducer(
+            "namespace_url.example.net",
+            "name",
+            lambda: mock.AsyncMock(),  # credential
+            ready_message=bad_ready_message,
+        )
+
+
+@pytest.mark.parametrize(
+    "good_ready_message",
+    [
+        "a simple message",
+        b"a simple message",
+        EventData(body=b"a simple message"),
+    ],
+)
+async def test_good_ready_message(good_ready_message, mockehub):
+    try:
+        producer = eventhub.ManagedAzureEventhubProducer(
+            "namespace_url.example.net",
+            "name",
+            lambda: mock.AsyncMock(),  # credential
+            ready_message=good_ready_message,
+        )
+    except ValueError:
+        pytest.fail("ValueError raised unexpectedly!")
+
+    # should work fine with different ready message types
+    conn = await producer.create()
+    await producer.ready(conn)
+
+    # create_batch, add, send_batch
+    assert len(mockehub.method_calls) == 3
+    one, two, three = mockehub.method_calls
+    assert one[0] == "create_batch"
+    assert two[0] == "add"
+    assert three[0] == "send_batch"
+    # We're mostly interested in the "add" call because it means we are bundling EventData properly
+    assert isinstance(two.args[0], EventData)
+    assert two.args[0].body_as_str() == "a simple message"
+
+
 def test_get_client(ehub, mockehub):
     assert ehub.get_client() == mockehub
     ehub._client = None
