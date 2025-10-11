@@ -295,6 +295,9 @@ class SharedTransportConnection:
 
         if self.expired and self.current_client_count == 1:
             logger.debug(f"[checkout {self}] Retiring Connection past its lifespan")
+            # This may look surprising, but `close()` may take a while and we want to discourage
+            # checkouts *while we are closing this client*.
+            self._should_close = True
             await self.close()
 
         if not self._connection:
