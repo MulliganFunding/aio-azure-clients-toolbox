@@ -1,29 +1,41 @@
 import asyncio
 import heapq
 import logging
-from collections import defaultdict
 
 import pytest
 from aio_azure_clients_toolbox import connection_pooling as cp
-from anyio import create_task_group, Event, sleep
+from anyio import create_task_group, Event, move_on_after, sleep
 
 
 class FakeConn(cp.AbstractConnection):
     def __init__(self):
         self.is_closed = False
+        self.usage_count = 0
+        self.used_after_close = False
 
     async def close(self):
         self.is_closed = True
+
+    def use(self):
+        """Simulate using the connection - should fail if called after close"""
+        if self.is_closed:
+            self.used_after_close = True
+            raise RuntimeError("Connection used after close!")
+        self.usage_count += 1
+        return f"used_{self.usage_count}"
 
 
 class FakeConnector(cp.AbstractorConnector):
     def __init__(self):
         self._created = False
         self._ready = False
+        self.references = []
 
     async def create(self):
         self._created = True
-        return FakeConn()
+        conn = FakeConn()
+        self.references.append(conn)
+        return conn
 
     async def ready(self, _conn):
         self._ready = True
@@ -132,12 +144,16 @@ async def test_comp_lt(shared_transpo_conn):
             await sleep(0.002)
 
     # Client count for stc2 is less-than
-    async with create_task_group() as tg:
-        tg.start_soon(acquirer, shared_transpo_conn)
-        tg.start_soon(acquirer, shared_transpo_conn)
-        tg.start_soon(acquirer, stc2)
-        await sleep(0.006)
-        assert stc2 < shared_transpo_conn, "Acquire makes client count LT"
+    # We wrap in timeout in case of deadlock
+    with move_on_after(0.2) as timeout_scope:
+        async with create_task_group() as tg:
+            tg.start_soon(acquirer, shared_transpo_conn)
+            tg.start_soon(acquirer, shared_transpo_conn)
+            tg.start_soon(acquirer, stc2)
+            await sleep(0.006)
+            assert stc2 < shared_transpo_conn, "Acquire makes client count LT"
+
+    assert not timeout_scope.cancel_called, "Deadlock in LT test"
 
     # Reset client counts happens after async context managed exits
     assert stc2 <= shared_transpo_conn, "Client count equal makes them LTE"
@@ -162,13 +178,16 @@ async def test_comp_gt(shared_transpo_conn):
             await sleep(0.002)
 
     # Client count for stc2 is less-than
-    async with create_task_group() as tg:
-        tg.start_soon(acquirer, shared_transpo_conn)
-        tg.start_soon(acquirer, shared_transpo_conn)
-        tg.start_soon(acquirer, stc2)
-        await sleep(0.006)
-        assert shared_transpo_conn > stc2, "Acquire makes client count GT"
+    # We wrap in timeout in case of deadlock
+    with move_on_after(0.2) as timeout_scope:
+        async with create_task_group() as tg:
+            tg.start_soon(acquirer, shared_transpo_conn)
+            tg.start_soon(acquirer, shared_transpo_conn)
+            tg.start_soon(acquirer, stc2)
+            await sleep(0.006)
+            assert shared_transpo_conn > stc2, "Acquire makes client count GT"
 
+    assert not timeout_scope.cancel_called, "Deadlock in GT test"
     # Reset client counts happens after async context managed exits
     assert shared_transpo_conn >= stc2, "Client count equal makes them GTE"
 
@@ -255,56 +274,22 @@ async def test_connection_pool_close(pool):
 
 async def test_pool_acquire_timeouts(slow_pool):
     """Check that acquire with timeout moves on sucessfully"""
-    with pytest.raises(cp.ConnectionsExhausted):
-        async with slow_pool.get(
-            timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS
-        ) as conn:
-            assert conn is None
+    # We wrap in timeout in case of deadlock
+    with move_on_after(0.2) as timeout_scope:
+        with pytest.raises(cp.ConnectionsExhausted):
+            async with slow_pool.get(timeout=SLOW_CONN_SLEEPINESS, acquire_timeout=SLOW_CONN_SLEEPINESS) as conn:
+                assert conn is None
+    assert not timeout_scope.cancel_called, "Deadlock in pool acquire timeout test"
 
 
 # # # # # # # # # # # # # # # # # #
 # ---**--> RACE CONDITION TESTS <--**---
 # # # # # # # # # # # # # # # # # #
-class ClosableTestConnection(cp.AbstractConnection):
-    """Test connection that tracks if it was closed while still being used"""
-
-    def __init__(self):
-        self.is_closed = False
-        self.usage_count = 0
-        self.used_after_close = False
-
-    async def close(self):
-        self.is_closed = True
-
-    def use(self):
-        """Simulate using the connection - should fail if called after close"""
-        if self.is_closed:
-            self.used_after_close = True
-            raise RuntimeError("Connection used after close!")
-        self.usage_count += 1
-        return f"used_{self.usage_count}"
-
-
-class RaceConditionTestConnector(cp.AbstractorConnector):
-    """Connector that creates trackable test connections"""
-
-    def __init__(self):
-        self.created_connections = []
-
-    async def create(self) -> cp.AbstractConnection:
-        conn = ClosableTestConnection()
-        self.created_connections.append(conn)
-        return conn
-
-    async def ready(self, connection: cp.AbstractConnection) -> bool:
-        return True
-
-
 @pytest.fixture
 def race_condition_shared_conn():
     """Shared connection with very short lifespan to trigger race conditions"""
     return cp.SharedTransportConnection(
-        RaceConditionTestConnector(),
+        FakeConnector(),
         client_limit=3,
         max_idle_seconds=0.002,  # Very short to trigger expiry quickly
         max_lifespan_seconds=0.003,  # Short lifespan
@@ -315,7 +300,7 @@ def race_condition_shared_conn():
 def race_condition_pool():
     """Connection pool with very short lifespans to trigger race conditions"""
     return cp.ConnectionPool(
-        RaceConditionTestConnector(),
+        FakeConnector(),
         client_limit=3,
         max_size=2,
         max_idle_seconds=0.001,
@@ -359,6 +344,7 @@ class CosmosLikeConnector(cp.AbstractorConnector):
     """Connector that creates cosmos-like connections"""
 
     def __init__(self):
+        self.is_closed = False
         self.created_connections = []
 
     async def create(self) -> cp.AbstractConnection:
@@ -368,6 +354,9 @@ class CosmosLikeConnector(cp.AbstractorConnector):
 
     async def ready(self, connection: cp.AbstractConnection) -> bool:
         return True
+
+    async def close(self):
+        self.is_closed = True
 
 
 async def test_race_condition_shared_connection_closed_while_in_use():
@@ -391,14 +380,16 @@ async def test_race_condition_shared_connection_closed_while_in_use():
         references.append(connection)
 
     # Force create a connection first
-    async with create_task_group() as tg:
-        tg.start_soon(checkouter, 0)
-        # Now wait for expiry
-        await sleep(0.003)
-        # Force the race condition by manually calling the problematic code path
-        # Get connection again (should reuse the same one)
-        tg.start_soon(checkouter, 1)
-        tg.start_soon(checkouter, 2)
+    with move_on_after(0.2) as timeout_scope:
+        async with create_task_group() as tg:
+            tg.start_soon(checkouter, 0)
+            # Now wait for expiry
+            await sleep(0.003)
+            # Force the race condition by manually calling the problematic code path
+            # Get connection again (should reuse the same one)
+            tg.start_soon(checkouter, 1)
+            tg.start_soon(checkouter, 2)
+    assert not timeout_scope.cancel_called, "Deadlock in shared connection race condition test"
 
     # Sanity check: we should have only one connection object
     assert shared_conn.current_client_count <= 1 and shared_conn.expired
@@ -447,7 +438,7 @@ async def test_race_condition_pool_connection_lifecycle():
     async def client_1():
         async with pool.get() as conn:
             references.append(conn)  # Store reference
-            await sleep(0.04)  # Exceed lifespan, connection will be closed in checkin
+            await sleep(0.04)  # Exceed lifespan, connection will be marked should_close
             client1_event.set()
 
         await client2_event.wait()
@@ -464,23 +455,90 @@ async def test_race_condition_pool_connection_lifecycle():
 
         # Now try to use it - should fail if race condition exists
         conn.use_container()
-        await sleep(0.04)  # Exceed lifespan, connection will be closed in checkin
+        await sleep(0.04)  # Exceed lifespan, connection will be marked should_close
         client2_event.set()
 
     # Run both clients
     try:
-        async with create_task_group() as tg:
-            tg.start_soon(client_1)
-            tg.start_soon(client_2)
+        with move_on_after(1.0) as timeout_scope:
+            async with create_task_group() as tg:
+                tg.start_soon(client_1)
+                tg.start_soon(client_2)
+        assert not timeout_scope.cancel_called, "Deadlock in pool connection lifecycle test"
     except* AttributeError as excgroup:
         for exc in excgroup.exceptions:
             if "Container client not constructed" in str(exc):
                 # Race condition successfully triggered!
-                pytest.fail(
-                    "Race condition detected - one client used a closed connection"
-                )
+                pytest.fail("Race condition detected - one client used a closed connection")
             else:
                 raise
+
+
+async def test_pool_connection_closes_safely():
+    """
+    Pool-level race condition test that tries to close a connection while another client is using it.
+    """
+    connector = FakeConnector()
+    pool = cp.ConnectionPool(
+        connector,
+        client_limit=2,
+        max_size=2,
+        max_idle_seconds=0.001,
+        max_lifespan_seconds=0.002,
+    )
+
+    # Hold references to connection objects
+    references = {}
+    # We're going to try to deadlock a little bit just for fun.
+    client1_event = Event()
+    client2_event = Event()
+
+    async def client_1():
+        async with pool.get() as conn:
+            references[0] = conn  # Store reference
+            await sleep(0.005)  # Exceed lifespan, connection will be marked should_close
+            conn.use()  # Should work fine
+            client1_event.set()
+
+    async def client_2():
+        await client1_event.wait()  # Start right after client 1
+        async with pool.get() as conn:
+            references[1] = conn  # Store reference
+            conn.use()  # Should work fine
+            await sleep(0.01)
+            client2_event.set()
+            # Should close *first* connection outside of context mgr!
+            assert references[0].is_closed
+
+    async def client_3():
+        # Get a connection immediately
+        async with pool.get() as conn:
+            await client2_event.wait()  # Start *after* client 2
+            references[2] = conn  # Store reference
+            conn.use()  # Should work fine
+
+    # Run both clients
+    try:
+        with move_on_after(1.0) as timeout_scope:
+            async with create_task_group() as tg:
+                tg.start_soon(client_1)
+                tg.start_soon(client_2)
+                tg.start_soon(client_3)
+        assert not timeout_scope.cancel_called, "Deadlock in pool connection close test"
+    except* AttributeError as excgroup:
+        for exc in excgroup.exceptions:
+            if "Container client not constructed" in str(exc):
+                # Race condition successfully triggered!
+                pytest.fail("Race condition detected - one client used a closed connection")
+            else:
+                raise
+
+    # No connections are reused here
+    identity_count = len(set(id(ref) for ref in references.values()))
+    assert len(references) == 3
+    assert identity_count == 3
+    assert sum(ref.is_closed for ref in references.values()) == 1
+    assert all(conn.should_close for conn in pool._pool)
 
 
 # # # # # # # # # # # # # # # # # #
@@ -497,11 +555,13 @@ async def test_regression_normal_connection_sharing(race_condition_pool):
             await sleep(0.0001)  # Very short usage, well within lifespan
 
     # Run clients that should share connections successfully
-    await asyncio.gather(
-        normal_client(1),
-        normal_client(2),
-        normal_client(3),
-    )
+    with move_on_after(1.0) as timeout_scope:
+        async with create_task_group() as tg:
+            tg.start_soon(normal_client, 1)
+            tg.start_soon(normal_client, 2)
+            tg.start_soon(normal_client, 3)
+
+    assert not timeout_scope.cancel_called, "Deadlock in normal connection sharing test"
 
     assert len(results) == 3
     assert all("used_" in result for result in results)
@@ -509,7 +569,7 @@ async def test_regression_normal_connection_sharing(race_condition_pool):
 
 async def test_regression_connection_cleanup_after_idle():
     """Ensures connections are properly cleaned up after idle timeout"""
-    connector = RaceConditionTestConnector()
+    connector = FakeConnector()
     shared_conn = cp.SharedTransportConnection(
         connector,
         client_limit=2,
@@ -535,7 +595,7 @@ async def test_regression_connection_cleanup_after_idle():
         conn.use()
 
     # Should have created a new connection (old one was cleaned up)
-    assert len(connector.created_connections) >= 1
+    assert len(connector.references) >= 1
 
 
 @pytest.mark.parametrize("client_count", [1, 3, 5, 7, 12, 21])
@@ -543,34 +603,42 @@ async def test_regression_semaphore_limits_enforced(
     client_count, race_condition_shared_conn
 ):
     """Ensures semaphore limits are still properly enforced"""
-    acquired_connections: dict[int, list[str]] = defaultdict(list)
+    deactivated_connections: dict[str, int] = {}
+    active_connections: dict[str, int] = {}
     exceptions = []
 
-    async def try_acquire(client_id):
+    async def try_acquire(client_id: str):
+        conn_id = None
         try:
             async with race_condition_shared_conn.acquire(timeout=0.002) as conn:
                 if conn is not None:
-                    acquired_connections[id(conn)].append(client_id)
+                    conn_id = id(conn)
+                    active_connections[client_id] = conn_id
                     await sleep(0.005)  # brief hold more than acquire timeout
+                    assert list(active_connections.values()).count(client_id) <= 3
         except Exception as e:
             exceptions.append(e)
+        if conn_id is not None:
+            del active_connections[client_id]
+            deactivated_connections[client_id] = conn_id
 
     # Try to acquire more connections than the limit allows
-    async with create_task_group() as tg:
-        for n in range(client_count):
-            tg.start_soon(try_acquire, f"{n}")
+    with move_on_after(1.0) as timeout_scope:
+        async with create_task_group() as tg:
+            for n in range(client_count):
+                tg.start_soon(try_acquire, f"{n}")
 
+    assert not timeout_scope.cancel_called, "Deadlock in semaphore limit test"
     # The fixture has `client_limit=3`, so we see that number of clients per connection
     # Prefer -> one connection shared,
-    assert len(acquired_connections.keys()) <= (client_count // 3) + 1
-    assert all(len(clients) <= 3 for clients in acquired_connections.values())
     assert len(exceptions) == 0
+    assert len(deactivated_connections) <= client_count
 
 
 async def test_regression_pool_heap_ordering():
     """Ensures pool still maintains proper heap ordering for connection freshness"""
     pool = cp.ConnectionPool(
-        RaceConditionTestConnector(),
+        FakeConnector(),
         client_limit=2,
         max_size=3,
         max_idle_seconds=0.1,

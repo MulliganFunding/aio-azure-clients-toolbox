@@ -22,6 +22,7 @@ idle timeouts for *all sockets*. For this reason, we will do the following:
 import binascii
 import heapq
 import logging
+import math
 import os
 import time
 from abc import ABC, abstractmethod
@@ -225,7 +226,7 @@ class SharedTransportConnection:
         else:
             lifetime_expired = False
 
-        # Check if time limit has been exceeded
+        # Check if idle or max lifespan time limit has been exceeded
         return self.time_spent_idle > self.max_idle_ns or lifetime_expired
 
     @property
@@ -247,7 +248,7 @@ class SharedTransportConnection:
         return now - self.last_idle_start
 
     def __str__(self):
-        return f"[Connection {self._id}]"
+        return f"<{self._connector.__class__.__name__}: {self._id}>"
 
     # The following comparison functions check the "freshness"
     # of a connection. Our logic is as follows: a connection is "fresher"
@@ -294,7 +295,10 @@ class SharedTransportConnection:
         now = time.monotonic_ns()
 
         if self.expired and self.current_client_count == 1:
-            logger.debug(f"{self} Retiring Connection past its lifespan")
+            logger.debug(f"[checkout {self}] Retiring Connection past its lifespan")
+            # This may look surprising, but `close()` may take a while and we want to discourage
+            # checkouts *while we are closing this client*.
+            self._should_close = True
             await self.close()
 
         if not self._connection:
@@ -312,26 +316,25 @@ class SharedTransportConnection:
 
         # Debug timings to reveal the extent of lock contention
         logger.debug(
-            f"[checkout] {self} available in {time.monotonic_ns()-now}ns "
-            f"semaphore state {repr(self.client_limiter)} "
+            f"[checkout {self}] available in {time.monotonic_ns() - now}ns. "
             f"Active client count: {self.current_client_count}"
         )
         return self._connection
 
     async def checkin(self, conn: AbstractConnection | None = None) -> None:
         """Called after a connection has been used"""
-        logger.debug(
-            f"[checkin] {self}.current_client_count is now {self.current_client_count}"
-        )
 
         # we only consider idle time to start when *one* client is connected
         if self.current_client_count == 1 and conn is not None:
-            logger.debug(f"{self} is now idle")
+            logger.debug(f"[checkin {self}] is now idle")
             self.last_idle_start = time.monotonic_ns()
 
         # Check if TTL exceeded for this connection
         if self.max_lifespan_ns is not None and self.expired:
+            logger.debug(f"[checkin {self}] Marking connection to be closed after use")
             self._should_close = True
+
+        logger.debug(f"[checkin {self}] current_client_count is now {self.current_client_count - 1}")
 
     @asynccontextmanager
     async def acquire(
@@ -363,7 +366,7 @@ class SharedTransportConnection:
 
         # We use a lock on *opening* a connection
         async with self._open_close_lock:
-            logger.debug(f"{self} Creating a new connection")
+            logger.debug(f"[create {self}] Creating a new connection")
             self._connection = await self._connector.create()
             # Check if we need to expire connections based on lifespan
             if self.max_lifespan_ns is not None:
@@ -385,17 +388,22 @@ class SharedTransportConnection:
         # Our goal is to set readiness Event once for one client.
         if self._connection:
             async with self._open_close_lock:
-                logger.debug(f"{self} Setting readiness")
+                logger.debug(f"[check_readiness {self}] Setting readiness")
                 is_ready = await self._connector.ready(self._connection)
                 if is_ready:
                     self._ready.set()
                 else:
-                    raise ConnectionFailed("Failed readying connection")
+                    raise ConnectionFailed(f"{self} Failed readying connection")
 
     @property
     def should_close(self) -> bool:
         """Check if connection should be closed"""
         return self._should_close
+
+    @property
+    def closeable(self) -> bool:
+        """Check if connection *can* be closed (no clients using it)"""
+        return self.should_close and self.current_client_count == 0
 
     async def close(self) -> None:
         """Closes the connection"""
@@ -404,7 +412,7 @@ class SharedTransportConnection:
 
         # We use a lock on *closing* a connection
         async with self._open_close_lock:
-            logger.debug(f"{self} Closing the Connection")
+            logger.debug(f"[close {self}] Closing the Connection")
             try:
                 await self._connection.close()
             except Exception:
@@ -489,18 +497,22 @@ class ConnectionPool:
         # We'll loop almost all connections in the pool to find a candidate
         # We add one in case it's zero.
         now = time.monotonic()
-        conn_check_n = self.max_size - 1 or 1
+        conn_check_n = math.floor(self.max_size // 1.25) or 1
         while not connection_reached and total_time < timeout:
             for shareable_conn in heapq.nsmallest(conn_check_n, self._pool):
                 if shareable_conn.available:
+                    logger.debug(
+                        f"[ConnPool] Acquiring {shareable_conn} with "
+                        f"active clients={shareable_conn.current_client_count}"
+                    )
                     async with shareable_conn.acquire(timeout=acquire_timeout) as conn:
                         # Do not yield connections that should be closed
                         if conn is not None and not shareable_conn.should_close:
                             yield conn
                             connection_reached = True
                             break
-                elif shareable_conn.should_close:
-                    logger.debug(f"{shareable_conn} Connection expired during acquire")
+                elif shareable_conn.closeable:
+                    logger.debug(f"[ConnPool] {shareable_conn} Closing expired connection")
                     await shareable_conn.close()
 
             # Arbitrary async yield to avoid busy loop
