@@ -22,6 +22,7 @@ idle timeouts for *all sockets*. For this reason, we will do the following:
 import binascii
 import heapq
 import logging
+import math
 import os
 import time
 from abc import ABC, abstractmethod
@@ -496,7 +497,7 @@ class ConnectionPool:
         # We'll loop almost all connections in the pool to find a candidate
         # We add one in case it's zero.
         now = time.monotonic()
-        conn_check_n = self.max_size - 1 or 1
+        conn_check_n = math.floor(self.max_size // 1.25) or 1
         while not connection_reached and total_time < timeout:
             for shareable_conn in heapq.nsmallest(conn_check_n, self._pool):
                 if shareable_conn.available:
