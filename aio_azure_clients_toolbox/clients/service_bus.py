@@ -61,6 +61,7 @@ class AzureServiceBus:
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
         credential_factory: CredentialFactory,
+        socket_timeout: float = 1,  ## Value in seconds. Azure default value is 0.2s
     ):
         self.namespace_url = service_bus_namespace_url
         self.queue_name = service_bus_queue_name
@@ -72,6 +73,7 @@ class AzureServiceBus:
         self._receiver_client: ServiceBusReceiver | None = None
         self._receiver_credential: DefaultAzureCredential | None = None
         self._sender_client: SendClientCloseWrapper | None = None
+        self._socket_timeout: float = socket_timeout
 
     def _validate_access_settings(self):
         if not all((self.namespace_url, self.queue_name)):
@@ -86,7 +88,9 @@ class AzureServiceBus:
         self._receiver_credential = credential
         sbc = ServiceBusClient(self.namespace_url, credential)
         self._receiver_client = sbc.get_queue_receiver(
-            queue_name=self.queue_name, receive_mode=ServiceBusReceiveMode.PEEK_LOCK
+            queue_name=self.queue_name,
+            receive_mode=ServiceBusReceiveMode.PEEK_LOCK,
+            socket_timeout=self._socket_timeout,
         )
         return self._receiver_client
 
@@ -97,7 +101,7 @@ class AzureServiceBus:
         credential = self.credential_factory()
         sbc = ServiceBusClient(self.namespace_url, credential)
 
-        sender_client = sbc.get_queue_sender(queue_name=self.queue_name)
+        sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
         self._sender_client = SendClientCloseWrapper(sender_client, credential)
         return self._sender_client
 
