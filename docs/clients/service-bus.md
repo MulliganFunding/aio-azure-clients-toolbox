@@ -49,11 +49,13 @@ ManagedAzureServiceBusSender(
 async def send_message(
     message: str,
     delay: int = 0,
-    **kwargs
+    unique_msg_id: str | None = None,
 ) -> None
 ```
 
 Send message to queue with optional delay.
+
+- **unique_msg_id**: Optional unique Service Bus `message_id` for deduplication-enabled queues.
 
 #### get_receiver
 
@@ -88,6 +90,12 @@ await sender.send_message(json.dumps(data))
 
 # Send with delay
 await sender.send_message("Delayed message", delay=300)  # 5 minutes
+
+# Send with explicit message id (useful for duplicate detection)
+await sender.send_message(
+    "Order created",
+    unique_msg_id="order-123-created-v1",
+)
 ```
 
 ### Message Processing
@@ -176,6 +184,9 @@ sbus = AzureServiceBus(
 
 # Send message
 await sbus.send_message("Hello from basic client")
+
+# Send message with unique id
+await sbus.send_message("Hello from basic client", unique_msg_id="basic-msg-001")
 
 # Get receiver
 receiver = sbus.get_receiver()

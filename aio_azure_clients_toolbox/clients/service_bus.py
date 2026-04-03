@@ -117,8 +117,20 @@ class AzureServiceBus:
             await self._sender_client.close()
             self._sender_client = None
 
-    async def send_message(self, msg: str, delay: int = 0):
+    async def send_message(self, msg: str, delay: int = 0, unique_msg_id: str | None = None):
+        """Schedule a message for delivery.
+
+        Args:
+            msg:
+                Message body to send.
+            delay:
+                Delay in seconds before the message is available for delivery.
+            unique_msg_id:
+                Optional unique Service Bus ``message_id`` used for deduplication.
+        """
         message = ServiceBusMessage(msg)
+        if unique_msg_id is not None:
+            message.message_id = unique_msg_id
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
         sender = self.get_sender()
@@ -244,8 +256,20 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         return False
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.send_message")
-    async def send_message(self, msg: str, delay: int = 0):
+    async def send_message(self, msg: str, delay: int = 0, unique_msg_id: str | None = None):
+        """Schedule a message for delivery using a pooled sender connection.
+
+        Args:
+            msg:
+                Message body to send.
+            delay:
+                Delay in seconds before the message is available for delivery.
+            unique_msg_id:
+                Optional unique Service Bus ``message_id`` used for deduplication.
+        """
         message = ServiceBusMessage(msg)
+        if unique_msg_id is not None:
+            message.message_id = unique_msg_id
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
         async with self.pool.get(**self.pool_kwargs) as conn:
