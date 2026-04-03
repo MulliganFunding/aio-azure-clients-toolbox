@@ -47,7 +47,7 @@ ManagedAzureServiceBusSender(
 
 ```python
 async def send_message(
-    message: str,
+    msg: str,
     delay: int = 0,
     unique_msg_id: str | None = None,
 ) -> None
