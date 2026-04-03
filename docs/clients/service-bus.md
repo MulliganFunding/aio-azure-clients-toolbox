@@ -50,12 +50,14 @@ async def send_message(
     msg: str,
     delay: int = 0,
     unique_msg_id: str | None = None,
+    **msg_kwargs,
 ) -> None
 ```
 
 Send message to queue with optional delay.
 
 - **unique_msg_id**: Optional unique Service Bus `message_id` for deduplication-enabled queues.
+- **\*\*msg_kwargs**: Additional keyword arguments forwarded directly to [`ServiceBusMessage`](https://learn.microsoft.com/en-us/python/api/azure-servicebus/azure.servicebus.servicebusmessage) (e.g. `content_type`, `correlation_id`, `subject`, `partition_key`, `session_id`, `reply_to`, `time_to_live`).
 
 #### get_receiver
 

@@ -127,6 +127,12 @@ class AzureServiceBus:
                 Delay in seconds before the message is available for delivery.
             unique_msg_id:
                 Optional unique Service Bus ``message_id`` used for deduplication.
+            **msg_kwargs:
+                Additional keyword arguments forwarded directly to
+                :class:`azure.servicebus.ServiceBusMessage` (e.g.
+                ``content_type``, ``correlation_id``, ``subject``,
+                ``partition_key``, ``session_id``, ``reply_to``,
+                ``time_to_live``).
         """
         message = ServiceBusMessage(msg, message_id=unique_msg_id, **msg_kwargs)
         now = datetime.datetime.now(tz=datetime.UTC)
@@ -264,6 +270,12 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
                 Delay in seconds before the message is available for delivery.
             unique_msg_id:
                 Optional unique Service Bus ``message_id`` used for deduplication.
+            **msg_kwargs:
+                Additional keyword arguments forwarded directly to
+                :class:`azure.servicebus.ServiceBusMessage` (e.g.
+                ``content_type``, ``correlation_id``, ``subject``,
+                ``partition_key``, ``session_id``, ``reply_to``,
+                ``time_to_live``).
         """
         message = ServiceBusMessage(msg, message_id=unique_msg_id, **msg_kwargs)
         now = datetime.datetime.now(tz=datetime.UTC)
