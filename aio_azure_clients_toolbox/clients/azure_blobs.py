@@ -10,7 +10,7 @@ import aiofiles
 from azure.core.exceptions import HttpResponseError
 from azure.identity.aio import DefaultAzureCredential
 from azure.storage.blob import BlobProperties, BlobSasPermissions, generate_blob_sas
-from azure.storage.blob.aio import BlobClient, BlobServiceClient
+from azure.storage.blob.aio import BlobClient, BlobServiceClient, StorageStreamDownloader
 
 # These limits are inclusive; names must not exceed these counts
 BLOB_NAME_CHAR_LIMIT = 1024
@@ -113,7 +113,7 @@ class AzureBlobStorageClient:
         """
         return blobify_filename(blob_name, quoting=quoting)
 
-    async def delete_blob(self, blob_name: str) -> None:
+    async def delete_blob(self, blob_name: str, **kwargs) -> None:
         """delete a blob from the container.
 
         Args:
@@ -123,9 +123,40 @@ class AzureBlobStorageClient:
         Returns: None
         """
         async with self.get_blob_client(blob_name) as client:
-            return await client.delete_blob()
+            return await client.delete_blob(**kwargs)
 
-    async def download_blob(self, blob_name: str) -> bytes:
+    @asynccontextmanager
+    async def get_blob_download_stream(self, blob_name: str, **kwargs) -> typing.AsyncIterator[StorageStreamDownloader]:
+        """Async context manager that yields a stream for downloading a blob from the container.
+
+        The underlying BlobClient is kept open for the duration of the `async with` block,
+        so all reads and property access must happen inside it.
+
+        This is useful, for example, if you want to stream a blob directly into another service without
+        loading it all into memory at once, or to inspect `StorageStreamDownloader.properties`
+        (e.g. etag, size, content_settings.content_type, etc.) before consuming the data.
+
+        Example::
+
+            async with client.get_blob_download_stream("my-blob") as stream:
+                etag = stream.properties.etag
+                async for chunk in stream.chunks():
+                    process(chunk)
+
+        Args:
+            blob_name (str): The name of the blob.
+        Raises:
+            AzureBlobError: If the blob cannot be accessed.
+        Yields:
+            StorageStreamDownloader: A stream downloader for the blob.
+        """
+        async with self.get_blob_client(blob_name) as client:
+            try:
+                yield await client.download_blob(**kwargs)
+            except HttpResponseError as exc:
+                raise AzureBlobError(exc) from exc
+
+    async def download_blob(self, blob_name: str, **kwargs) -> bytes:
         """Download a blob from the container into bytes in memory.
 
         Args:
@@ -135,11 +166,10 @@ class AzureBlobStorageClient:
         Returns:
             bytes: *ALL* bytes of the blob.
         """
-        async with self.get_blob_client(blob_name) as client:
-            stream = await client.download_blob()
-            return await stream.readall()
+        async with self.get_blob_download_stream(blob_name, **kwargs) as stream:
+            return await stream.readall()  # type: ignore
 
-    async def download_blob_to_dir(self, workspace_dir: str, blob_name: str) -> str:
+    async def download_blob_to_dir(self, workspace_dir: str, blob_name: str, **kwargs) -> str:
         """
         Download Blob to a workspace_dir.
 
@@ -156,7 +186,7 @@ class AzureBlobStorageClient:
         # Write file into file path in tempdir
         async with aiofiles.open(save_path, "wb") as fl:
             async with self.get_blob_client(blob_name) as client:
-                stream = await client.download_blob()
+                stream = await client.download_blob(**kwargs)
                 # Read data in chunks to avoid loading all into memory at once
                 async for chunk in stream.chunks():
                     # `chunk` is a byte array

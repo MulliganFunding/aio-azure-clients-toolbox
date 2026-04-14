@@ -48,3 +48,6 @@ docs-build *args:
 docs-serve:
     uv run --group docs mkdocs serve
 
+# Run an ipython repl
+repl:
+    uv run --extra repl ipython
