@@ -130,7 +130,7 @@ class AzureBlobStorageClient:
 
         This is useful, for example, if you want to stream a blob directly into another service without
         loading it all into memory at once and because `StorageStreamDownloader` has `properties` which can be useful
-        as well (e.g. etag, content_length, content_type, etc.).
+        as well (e.g. etag, size, content_settings.content_type, etc.).
 
         Args:
             blob_name (str): The name of the blob.
