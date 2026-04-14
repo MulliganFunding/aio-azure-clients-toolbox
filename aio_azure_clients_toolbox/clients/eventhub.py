@@ -65,9 +65,12 @@ class Eventhub:
         return self._client
 
     async def close(self):
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        try:
+            if self._client is not None:
+                await self._client.close()
+                self._client = None
+        except Exception as exc:
+            logger.exception(f"Eventhub client close failed with {exc}")
         try:
             await self.credential.close()
         except Exception as exc:

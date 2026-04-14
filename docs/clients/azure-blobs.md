@@ -36,6 +36,19 @@ async def upload_blob(
 
 Upload data to blob storage.
 
+#### get_blob_download_stream
+
+```python
+async def get_blob_download_stream(blob_name: str, **kwargs) -> StorageStreamDownloader
+```
+
+Get a `StorageStreamDownloader` for the blob without loading it entirely into memory. Use this when you want to:
+
+- Stream a large blob chunk-by-chunk to another service
+- Access blob metadata (e.g. `etag`, `content_length`, `content_type`) before or without consuming the data
+
+Raises `AzureBlobError` if the blob cannot be accessed.
+
 #### download_blob
 
 ```python
@@ -99,6 +112,27 @@ async def get_blob_sas_url(
 Generate complete SAS URL for blob access.
 
 ## Usage Examples
+
+### Streaming Downloads and Blob Properties
+
+Use `get_blob_download_stream` to stream a blob chunk-by-chunk or inspect its metadata without downloading the full content:
+
+```python
+# Stream a blob in chunks (avoids loading all into memory)
+stream = await blob_client.get_blob_download_stream("large-file.bin")
+async for chunk in stream.chunks():
+    process(chunk)
+
+# Access blob properties (e.g. etag) before or without consuming the data
+stream = await blob_client.get_blob_download_stream("documents/report.pdf")
+etag = stream.properties.etag
+content_type = stream.properties.content_settings.content_type
+content_length = stream.properties.size
+print(f"etag={etag}, type={content_type}, size={content_length} bytes")
+
+# Read all bytes after inspecting properties
+data = await stream.readall()
+```
 
 ### Basic Operations
 
