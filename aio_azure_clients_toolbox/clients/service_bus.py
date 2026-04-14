@@ -204,7 +204,6 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             "timeout": pool_get_timeout,
             "acquire_timeout": pool_connection_create_timeout,
         }
-        self._receiver_client: AzureServiceBus | None = None
 
     def get_sender(self) -> SendClientCloseWrapper:
         client = AzureServiceBus(
@@ -222,22 +221,17 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         """
         Proxy for AzureServiceBus.get_receiver. Here
         for consistency with above class.
-
-        The receiver client is tracked so its credential can be closed via close().
         """
-        self._receiver_client = AzureServiceBus(
+        client = AzureServiceBus(
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
             self.credential_factory,
         )
-        return self._receiver_client.get_receiver()
+        return client.get_receiver()
 
     async def close(self):
-        """Closes all connections in our pool and any tracked receiver credential."""
+        """Closes all connections in our pool"""
         await self.pool.closeall()
-        if self._receiver_client is not None:
-            await self._receiver_client.close()
-            self._receiver_client = None
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
     async def ready(self, conn: SendClientCloseWrapper) -> bool:

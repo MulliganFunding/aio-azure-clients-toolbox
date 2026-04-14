@@ -125,7 +125,8 @@ class AzureBlobStorageClient:
         async with self.get_blob_client(blob_name) as client:
             return await client.delete_blob(**kwargs)
 
-    async def get_blob_download_stream(self, blob_name: str, **kwargs) -> StorageStreamDownloader:
+    @asynccontextmanager
+    async def get_blob_download_stream(self, blob_name: str, **kwargs) -> typing.AsyncIterator[StorageStreamDownloader]:
         """Get a stream for downloading a blob from the container.
 
         This is useful, for example, if you want to stream a blob directly into another service without
@@ -141,7 +142,7 @@ class AzureBlobStorageClient:
         """
         async with self.get_blob_client(blob_name) as client:
             try:
-                return await client.download_blob(**kwargs)
+                yield await client.download_blob(**kwargs)
             except HttpResponseError as exc:
                 raise AzureBlobError(exc) from exc
 
@@ -155,8 +156,8 @@ class AzureBlobStorageClient:
         Returns:
             bytes: *ALL* bytes of the blob.
         """
-        stream = await self.get_blob_download_stream(blob_name, **kwargs)
-        return await stream.readall()
+        async with self.get_blob_download_stream(blob_name, **kwargs) as stream:
+            return await stream.readall()  # type: ignore
 
     async def download_blob_to_dir(self, workspace_dir: str, blob_name: str, **kwargs) -> str:
         """

@@ -39,13 +39,14 @@ Upload data to blob storage.
 #### get_blob_download_stream
 
 ```python
-async def get_blob_download_stream(blob_name: str, **kwargs) -> StorageStreamDownloader
+@asynccontextmanager
+async def get_blob_download_stream(blob_name: str, **kwargs) -> AsyncIterator[StorageStreamDownloader]
 ```
 
-Get a `StorageStreamDownloader` for the blob without loading it entirely into memory. Use this when you want to:
+Async context manager that yields a `StorageStreamDownloader` for the blob, keeping the underlying `BlobClient` open for the duration of the `async with` block. Use this when you want to:
 
 - Stream a large blob chunk-by-chunk to another service
-- Access blob metadata (e.g. `etag`, `content_length`, `content_type`) before or without consuming the data
+- Access blob metadata (e.g. `etag`, `size`, `content_settings.content_type`) before or without consuming the data
 
 Raises `AzureBlobError` if the blob cannot be accessed.
 
@@ -115,23 +116,23 @@ Generate complete SAS URL for blob access.
 
 ### Streaming Downloads and Blob Properties
 
-Use `get_blob_download_stream` to stream a blob chunk-by-chunk or inspect its metadata without downloading the full content:
+Use `get_blob_download_stream` as an async context manager to stream a blob chunk-by-chunk or inspect its metadata. The underlying client stays open for the lifetime of the `async with` block, so all reads and property access must happen inside it:
 
 ```python
 # Stream a blob in chunks (avoids loading all into memory)
-stream = await blob_client.get_blob_download_stream("large-file.bin")
-async for chunk in stream.chunks():
-    process(chunk)
+async with blob_client.get_blob_download_stream("large-file.bin") as stream:
+    async for chunk in stream.chunks():
+        process(chunk)
 
-# Access blob properties (e.g. etag) before or without consuming the data
-stream = await blob_client.get_blob_download_stream("documents/report.pdf")
-etag = stream.properties.etag
-content_type = stream.properties.content_settings.content_type
-content_length = stream.properties.size
-print(f"etag={etag}, type={content_type}, size={content_length} bytes")
+# Access blob properties (e.g. etag) alongside the data
+async with blob_client.get_blob_download_stream("documents/report.pdf") as stream:
+    etag = stream.properties.etag
+    content_type = stream.properties.content_settings.content_type
+    content_length = stream.properties.size
+    print(f"etag={etag}, type={content_type}, size={content_length} bytes")
 
-# Read all bytes after inspecting properties
-data = await stream.readall()
+    # Optionally read all bytes too
+    data = await stream.readall()
 ```
 
 ### Basic Operations

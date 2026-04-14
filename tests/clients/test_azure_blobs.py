@@ -104,22 +104,23 @@ async def test_delete_blob(with_error, absc, mock_azureblob):
 async def test_get_blob_download_stream(absc, mock_azureblob):
     _, _, set_return = mock_azureblob
     set_return.download_blob_returns(b"HEY")
-    stream = await absc.get_blob_download_stream("some-blob")
-    assert await stream.readall() == b"HEY"
+    async with absc.get_blob_download_stream("some-blob") as stream:
+        assert await stream.readall() == b"HEY"
 
 
 async def test_get_blob_download_stream_error(absc, mock_azureblob):
     _, mockblobc, _ = mock_azureblob
     mockblobc.download_blob = mock.AsyncMock(side_effect=HttpResponseError(message="not found"))
     with pytest.raises(azure_blobs.AzureBlobError):
-        await absc.get_blob_download_stream("some-blob")
+        async with absc.get_blob_download_stream("some-blob"):
+            pass
 
 
 async def test_get_blob_download_stream_chunks(absc, mock_azureblob):
     _, _, set_return = mock_azureblob
     set_return.download_blob_returns(b"CHUNK")
-    stream = await absc.get_blob_download_stream("some-blob")
-    chunks = [chunk async for chunk in stream.chunks()]
+    async with absc.get_blob_download_stream("some-blob") as stream:
+        chunks = [chunk async for chunk in stream.chunks()]
     assert chunks == [b"CHUNK"]
 
 
@@ -130,8 +131,8 @@ async def test_get_blob_download_stream_properties(absc, mock_azureblob):
     stream_mock.properties = mock.Mock()
     stream_mock.properties.etag = '"0x8DBBAF4B8A6017C"'
 
-    stream = await absc.get_blob_download_stream("some-blob")
-    assert stream.properties.etag == '"0x8DBBAF4B8A6017C"'
+    async with absc.get_blob_download_stream("some-blob") as stream:
+        assert stream.properties.etag == '"0x8DBBAF4B8A6017C"'
 
 
 async def test_download_blob(absc, mock_azureblob):
