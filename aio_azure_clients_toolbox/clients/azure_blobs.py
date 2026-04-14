@@ -127,17 +127,27 @@ class AzureBlobStorageClient:
 
     @asynccontextmanager
     async def get_blob_download_stream(self, blob_name: str, **kwargs) -> typing.AsyncIterator[StorageStreamDownloader]:
-        """Get a stream for downloading a blob from the container.
+        """Async context manager that yields a stream for downloading a blob from the container.
+
+        The underlying BlobClient is kept open for the duration of the `async with` block,
+        so all reads and property access must happen inside it.
 
         This is useful, for example, if you want to stream a blob directly into another service without
-        loading it all into memory at once and because `StorageStreamDownloader` has `properties` which can be useful
-        as well (e.g. etag, size, content_settings.content_type, etc.).
+        loading it all into memory at once, or to inspect `StorageStreamDownloader.properties`
+        (e.g. etag, size, content_settings.content_type, etc.) before consuming the data.
+
+        Example::
+
+            async with client.get_blob_download_stream("my-blob") as stream:
+                etag = stream.properties.etag
+                async for chunk in stream.chunks():
+                    process(chunk)
 
         Args:
             blob_name (str): The name of the blob.
         Raises:
             AzureBlobError: If the blob cannot be accessed.
-        Returns:
+        Yields:
             StorageStreamDownloader: A stream downloader for the blob.
         """
         async with self.get_blob_client(blob_name) as client:
