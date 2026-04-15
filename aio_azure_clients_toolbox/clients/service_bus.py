@@ -88,7 +88,7 @@ class AzureServiceBus:
         if self._receiver_client is not None:
             return self._receiver_client
 
-        if self.credential_factory:
+        if callable(self.credential_factory):
             credential = self.credential_factory()
             self._receiver_credential = credential
             sbc = ServiceBusClient(self.namespace_url, credential)
@@ -102,11 +102,11 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    def get_sender(self) -> SendClientCloseWrapper:
+    def get_sender(self) -> SendClientCloseWrapper | ServiceBusClient:
         if self._sender_client is not None:
             return self._sender_client
 
-        if self.credential_factory:
+        if callable(self.credential_factory):
             credential = self.credential_factory()
             sbc = ServiceBusClient(self.namespace_url, credential)
             sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
@@ -198,7 +198,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         self.connection_string = connection_string
         if not any([isinstance(connection_string, str), callable(credential_factory)]):
             raise ValueError(
-                "credential_factory must be a callable returning a credential"
+                "credential_factory must be a callable returning a credential or connection_string must be a string"
             )
 
         self.credential_factory = credential_factory
