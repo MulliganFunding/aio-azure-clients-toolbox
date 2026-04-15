@@ -21,7 +21,7 @@ CLIENT_IDLE_SECONDS_DEFAULT = 30
 
 
 @enum.unique
-class PatchOp(str, enum.Enum):
+class PatchOp(enum.StrEnum):
     """
     Following is an example of patch operations:
         operations = [

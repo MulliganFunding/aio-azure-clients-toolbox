@@ -43,6 +43,14 @@ async def test_send_message(sbus, mockservicebus):
     assert mockservicebus._sender.method_calls
 
 
+async def test_send_message_with_unique_msg_id(sbus, mockservicebus):
+    unique_msg_id = "unique-msg-123"
+    await sbus.send_message("hey", unique_msg_id=unique_msg_id)
+
+    scheduled_message = mockservicebus._sender.schedule_messages.call_args.args[0]
+    assert scheduled_message.message_id == unique_msg_id
+
+
 # # # # # # # # # # # # # # # # # #
 # ---**--> Managed Client <--**---
 # # # # # # # # # # # # # # # # # #
@@ -118,3 +126,11 @@ async def test_managed_sbus_send_message(managed_sbus_throwing, managed_sbus):
 async def test_managed_send_message(managed_sbus, mockservicebus):
     await managed_sbus.send_message("hey")
     assert mockservicebus._sender.method_calls
+
+
+async def test_managed_send_message_with_unique_msg_id(managed_sbus, mockservicebus):
+    unique_msg_id = "managed-unique-msg-123"
+    await managed_sbus.send_message("hey", unique_msg_id=unique_msg_id)
+
+    scheduled_message = mockservicebus._sender.schedule_messages.call_args.args[0]
+    assert scheduled_message.message_id == unique_msg_id
