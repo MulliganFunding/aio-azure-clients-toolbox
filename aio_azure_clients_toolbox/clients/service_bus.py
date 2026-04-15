@@ -60,20 +60,24 @@ class AzureServiceBus:
         self,
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
-        credential_factory: CredentialFactory,
-        socket_timeout: float = 1,  ## Value in seconds. Azure default value is 0.2s
+        credential_factory: CredentialFactory | None=None,
+        socket_timeout: float = 1,  # Value in seconds. Azure default value is 0.2s
+        connection_string: str | None = None,
     ):
         self.namespace_url = service_bus_namespace_url
         self.queue_name = service_bus_queue_name
-        if not callable(credential_factory):
+        self.connection_string: str | None = connection_string
+
+        if not any([isinstance(connection_string, str), callable(credential_factory)]):
             raise ValueError(
-                "credential_factory must be a callable returning a credential"
+                "credential_factory must be a callable returning a credential or connection_string must be a string"
             )
         self.credential_factory = credential_factory
         self._receiver_client: ServiceBusReceiver | None = None
         self._receiver_credential: DefaultAzureCredential | None = None
         self._sender_client: SendClientCloseWrapper | None = None
         self._socket_timeout: float = socket_timeout
+
 
     def _validate_access_settings(self):
         if not all((self.namespace_url, self.queue_name)):
@@ -84,9 +88,13 @@ class AzureServiceBus:
         if self._receiver_client is not None:
             return self._receiver_client
 
-        credential = self.credential_factory()
-        self._receiver_credential = credential
-        sbc = ServiceBusClient(self.namespace_url, credential)
+        if callable(self.credential_factory):
+            credential = self.credential_factory()
+            self._receiver_credential = credential
+            sbc = ServiceBusClient(self.namespace_url, credential)
+        else:
+            sbc = ServiceBusClient.from_connection_string(self.connection_string)
+
         self._receiver_client = sbc.get_queue_receiver(
             queue_name=self.queue_name,
             receive_mode=ServiceBusReceiveMode.PEEK_LOCK,
@@ -94,15 +102,19 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    def get_sender(self) -> SendClientCloseWrapper:
+    def get_sender(self) -> SendClientCloseWrapper | ServiceBusClient:
         if self._sender_client is not None:
             return self._sender_client
 
-        credential = self.credential_factory()
-        sbc = ServiceBusClient(self.namespace_url, credential)
+        if callable(self.credential_factory):
+            credential = self.credential_factory()
+            sbc = ServiceBusClient(self.namespace_url, credential)
+            sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
+            self._sender_client = SendClientCloseWrapper(sender_client, credential)
+        else:
+            sbc = ServiceBusClient.from_connection_string(self.connection_string)
+            self._sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
 
-        sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
-        self._sender_client = SendClientCloseWrapper(sender_client, credential)
         return self._sender_client
 
     async def close(self):
@@ -171,7 +183,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         self,
         service_bus_namespace_url: str,
         service_bus_queue_name: str,
-        credential_factory: CredentialFactory,
+        credential_factory: CredentialFactory | None = None,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = SERVICE_BUS_SEND_TTL_SECONDS,
@@ -179,16 +191,17 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         ready_message: str | bytes = "Connection established",
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
+        connection_string: str | None = None,
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
-        if not callable(credential_factory):
+        self.connection_string = connection_string
+        if not any([isinstance(connection_string, str), callable(credential_factory)]):
             raise ValueError(
-                "credential_factory must be a callable returning a credential"
+                "credential_factory must be a callable returning a credential or connection_string must be a string"
             )
 
         self.credential_factory = credential_factory
-
         self.pool = connection_pooling.ConnectionPool(
             self,
             client_limit=client_limit,
@@ -210,6 +223,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
             self.credential_factory,
+            connection_string=self.connection_string,
         )
         return client.get_sender()
 
@@ -226,6 +240,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
             self.credential_factory,
+            connection_string=self.connection_string,
         )
         return client.get_receiver()
 
