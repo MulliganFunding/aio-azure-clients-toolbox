@@ -236,16 +236,19 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         Proxy for AzureServiceBus.get_receiver. Here
         for consistency with above class.
         """
-        client = AzureServiceBus(
+        self._receiver_client = AzureServiceBus(
             self.service_bus_namespace_url,
             self.service_bus_queue_name,
             self.credential_factory,
             connection_string=self.connection_string,
         )
-        return client.get_receiver()
+        return self._receiver_client.get_receiver()
 
     async def close(self):
         """Closes all connections in our pool"""
+        if hasattr(self, '_receiver_client') and self._receiver_client is not None:
+            await self._receiver_client.close()
+            self._receiver_client = None
         await self.pool.closeall()
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.ready")
