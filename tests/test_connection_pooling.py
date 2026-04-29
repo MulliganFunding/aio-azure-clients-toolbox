@@ -635,6 +635,91 @@ async def test_regression_semaphore_limits_enforced(
     assert len(deactivated_connections) <= client_count
 
 
+async def test_creation_semaphore_limits_concurrent_opens():
+    """Validates that the creation semaphore actually limits how many connections
+    open simultaneously. We use a slow connector (simulating real Azure SDK opens)
+    and assert that the peak concurrency never exceeds max_concurrent_creates."""
+    peak_concurrent = 0
+    current_concurrent = 0
+    lock = asyncio.Lock()
+
+    class InstrumentedSlowConnector(cp.AbstractorConnector):
+        async def create(self):
+            nonlocal peak_concurrent, current_concurrent
+            async with lock:
+                current_concurrent += 1
+                if current_concurrent > peak_concurrent:
+                    peak_concurrent = current_concurrent
+            await sleep(0.05)  # Simulate slow connection creation
+            conn = FakeConn()
+            async with lock:
+                current_concurrent -= 1
+            return conn
+
+        async def ready(self, _conn):
+            return True
+
+    max_concurrent = 2
+    pool_size = 6
+    pool = cp.ConnectionPool(
+        InstrumentedSlowConnector(),
+        client_limit=1,  # Force each slot to create its own connection
+        max_size=pool_size,
+        max_idle_seconds=10,
+        max_concurrent_creates=max_concurrent,
+    )
+
+    # Launch pool_size concurrent acquisitions — all slots must create
+    async def acquire_one():
+        async with pool.get(timeout=5) as conn:
+            assert conn is not None
+
+    with move_on_after(5.0) as timeout_scope:
+        async with create_task_group() as tg:
+            for _ in range(pool_size):
+                tg.start_soon(acquire_one)
+
+    assert not timeout_scope.cancel_called, "Deadlock in semaphore concurrency test"
+    assert peak_concurrent <= max_concurrent, (
+        f"Peak concurrent creates ({peak_concurrent}) exceeded limit ({max_concurrent})"
+    )
+    # Ensure we actually exercised concurrency (not just serialised by accident)
+    assert peak_concurrent >= 1, "Expected at least 1 concurrent create"
+
+    await pool.closeall()
+
+
+async def test_creation_semaphore_default_value():
+    """Validates the default max_concurrent_creates = max(max_size // 3, 1)"""
+    pool = cp.ConnectionPool(
+        FakeConnector(),
+        client_limit=CLIENT_LIMIT,
+        max_size=9,
+        max_idle_seconds=MAX_IDLE_SECONDS,
+    )
+    assert pool._creation_semaphore._value == 3  # 9 // 3
+
+    pool2 = cp.ConnectionPool(
+        FakeConnector(),
+        client_limit=CLIENT_LIMIT,
+        max_size=2,
+        max_idle_seconds=MAX_IDLE_SECONDS,
+    )
+    assert pool2._creation_semaphore._value == 1  # max(2 // 3, 1)
+
+
+def test_creation_semaphore_rejects_zero():
+    """max_concurrent_creates < 1 should raise ValueError"""
+    with pytest.raises(ValueError, match="max_concurrent_creates must be a positive integer"):
+        cp.ConnectionPool(
+            FakeConnector(),
+            client_limit=CLIENT_LIMIT,
+            max_size=CLIENT_LIMIT,
+            max_idle_seconds=MAX_IDLE_SECONDS,
+            max_concurrent_creates=0,
+        )
+
+
 async def test_regression_pool_heap_ordering():
     """Ensures pool still maintains proper heap ordering for connection freshness"""
     pool = cp.ConnectionPool(

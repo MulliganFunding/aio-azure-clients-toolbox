@@ -184,6 +184,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         Timeout for creating a connection in the pool (default: 10 seconds).
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
+      max_concurrent_creates:
+        Max number of connections that can be created simultaneously across all
+        pool slots. Defaults to ``max(max_size // 3, 1)``.
       ready_message:
         A string, bytes, or EventData object representing the first "ready" message sent to establish connection.
     """
@@ -201,6 +204,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         max_lifespan_seconds: int | None = None,
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
+        max_concurrent_creates: int | None = None,
     ):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
@@ -216,6 +220,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
+            max_concurrent_creates=max_concurrent_creates,
         )
         if not isinstance(ready_message, (str, bytes, EventData)):
             raise ValueError("ready_message must be a string, bytes, or EventData")

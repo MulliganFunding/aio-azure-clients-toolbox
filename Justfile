@@ -22,23 +22,20 @@ format:
 
 # Run code quality checks
 check:
-    #!/bin/bash -eux
     uv run ruff check aio_azure_clients_toolbox tests
+    just check-types
 
 # Run ty checks
 check-types:
-    #!/bin/bash -eux
     uv run ty check aio_azure_clients_toolbox
 
 # Run all tests locally
 test *args:
-    #!/bin/bash -eux
     uv run pytest {{args}}
 
 # Run the project tests for CI environment (e.g. with code coverage)
 ci-test coverage_dir='./coverage':
     uv run pytest --cov=aio_azure_clients_toolbox --cov-report xml --junitxml=./coverage/unittest.junit.xml
-
 
 # Build documentation locally
 docs-build *args:

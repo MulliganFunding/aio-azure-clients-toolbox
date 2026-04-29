@@ -37,10 +37,6 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           just check
-      - name: Code quality checks
-        run: |
-          cd ${{ github.workspace }}
-          just check-types
       - name: Run tests
         run: |
           cd ${{ github.workspace }}
