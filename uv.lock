@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "aio-azure-clients-toolbox"
-version = "1.3.0"
+version = "1.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

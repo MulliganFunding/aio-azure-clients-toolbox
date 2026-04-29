@@ -303,10 +303,25 @@ class SharedTransportConnection:
 
         if not self._connection:
             self._connection = await self.create()
-            # Make sure connection is ready
-            # one thing we could do here is yield the connection and set our event after
-            # the *first* successful usage, but defining that success is tougher...?
-            await self.check_readiness()
+            # Make sure connection is ready. If we are cancelled (e.g. by
+            # move_on_after in acquire()) between create() and the completion
+            # of check_readiness(), the connection would be left with an open
+            # transport/aiohttp session but _ready never set — a permanent
+            # zombie. The finally block detects this and cleans up.
+            try:
+                await self.check_readiness()
+            except BaseException:
+                if self._connection is not None and not self._ready.is_set():
+                    logger.debug(f"[checkout {self}] Cleaning up connection after failed/cancelled readiness")
+                    try:
+                        await self._connection.close()
+                    except Exception:
+                        pass
+                    self._connection = None
+                    self._ready = anyio.Event()
+                    self.last_idle_start = None
+                    self.connection_created_ts = None
+                raise
 
         self.last_idle_start = None
 
@@ -393,6 +408,19 @@ class SharedTransportConnection:
                 if is_ready:
                     self._ready.set()
                 else:
+                    # Close the partially-open connection so its aiohttp session
+                    # and AMQP transport are released before we raise.
+                    # We cannot call self.close() here because we already hold
+                    # _open_close_lock, so we perform the reset inline.
+                    try:
+                        await self._connection.close()
+                    except Exception:
+                        pass
+                    self._should_close = False
+                    self._connection = None
+                    self._ready = anyio.Event()
+                    self.last_idle_start = None
+                    self.connection_created_ts = None
                     raise ConnectionFailed(f"{self} Failed readying connection")
 
     @property
@@ -423,8 +451,7 @@ class SharedTransportConnection:
             self._connection = None
             self._ready = anyio.Event()
             self.last_idle_start = None
-            if self.max_lifespan_ns is not None:
-                self.connection_created_ts = None
+            self.connection_created_ts = None
 
 
 class ConnectionPool:
@@ -513,6 +540,16 @@ class ConnectionPool:
                             break
                 elif shareable_conn.closeable:
                     logger.debug(f"[ConnPool] {shareable_conn} Closing expired connection")
+                    await shareable_conn.close()
+                elif (
+                    shareable_conn._connection is not None
+                    and not shareable_conn.is_ready
+                    and shareable_conn.current_client_count == 0
+                ):
+                    # Stuck connection: has an open transport but readiness
+                    # was never established (e.g. cancelled during checkout).
+                    # Close it so the slot can be reused.
+                    logger.debug(f"[ConnPool] {shareable_conn} Closing stuck connection (open but not ready)")
                     await shareable_conn.close()
 
             # Arbitrary async yield to avoid busy loop
