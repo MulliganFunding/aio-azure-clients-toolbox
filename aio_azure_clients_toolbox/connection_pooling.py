@@ -312,14 +312,7 @@ class SharedTransportConnection:
             except BaseException:
                 if self._connection is not None and not self._ready.is_set():
                     logger.debug(f"[checkout {self}] Cleaning up connection after failed/cancelled readiness")
-                    try:
-                        await self._connection.close()
-                    except Exception:
-                        pass
-                    self._connection = None
-                    self._ready = anyio.Event()
-                    self.last_idle_start = None
-                    self.connection_created_ts = None
+                    await self._reset_connection()
                 raise
 
         self.last_idle_start = None
@@ -393,6 +386,24 @@ class SharedTransportConnection:
         """Proxy for whether our readiness Event has been set."""
         return self._ready.is_set()
 
+    async def _reset_connection(self) -> None:
+        """Close the underlying transport and reset to initial state.
+
+        Callers that already hold _open_close_lock must pass the connection
+        to close directly and reset attributes inline — this helper acquires
+        no lock itself, so it is safe to call from within a locked context.
+        """
+        if self._connection is not None:
+            try:
+                await self._connection.close()
+            except Exception:
+                pass
+        self._should_close = False
+        self._connection = None
+        self._ready = anyio.Event()
+        self.last_idle_start = None
+        self.connection_created_ts = None
+
     async def check_readiness(self) -> None:
         """Indicates when ready by waiting for the connector to signal"""
         if self._ready.is_set():
@@ -409,17 +420,9 @@ class SharedTransportConnection:
                 else:
                     # Close the partially-open connection so any aiohttp sessions
                     # and/or AMQP transports are released before we raise.
-                    # We cannot call self.close() here because we already hold
-                    # _open_close_lock, so we perform the reset inline.
-                    try:
-                        await self._connection.close()
-                    except Exception:
-                        pass
-                    self._should_close = False
-                    self._connection = None
-                    self._ready = anyio.Event()
-                    self.last_idle_start = None
-                    self.connection_created_ts = None
+                    # We already hold _open_close_lock, but _reset_connection
+                    # does not acquire it, so this is safe.
+                    await self._reset_connection()
                     raise ConnectionFailed(f"{self} Failed readying connection")
 
     @property
@@ -440,17 +443,7 @@ class SharedTransportConnection:
         # We use a lock on *closing* a connection
         async with self._open_close_lock:
             logger.debug(f"[close {self}] Closing the Connection")
-            try:
-                await self._connection.close()
-            except Exception:
-                pass
-
-            # Reset attributes to initial state
-            self._should_close = False
-            self._connection = None
-            self._ready = anyio.Event()
-            self.last_idle_start = None
-            self.connection_created_ts = None
+            await self._reset_connection()
 
 
 class ConnectionPool:
