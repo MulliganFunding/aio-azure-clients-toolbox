@@ -1,6 +1,7 @@
 import asyncio
 import heapq
 import logging
+from unittest import mock
 
 import pytest
 from aio_azure_clients_toolbox import connection_pooling as cp
@@ -751,6 +752,101 @@ async def test_regression_pool_heap_ordering():
 # # # # # # # # # # # # # # # # # #
 # ---**--> send_time_deco tests <--**---
 # # # # # # # # # # # # # # # # # #
+
+
+async def test_gte_comparison():
+    """Cover __gte__ method"""
+    stc1 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    stc2 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    # Same state -> GTE
+    assert stc1.__gte__(stc2)
+    # Different client counts
+    async with stc1.acquire():
+        # stc1 has more clients
+        assert stc1.__gte__(stc2)
+        assert not stc2.__gte__(stc1)
+
+
+async def test_lte_comparison():
+    """Cover __lte__ method"""
+    stc1 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    stc2 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    # Same state -> LTE
+    assert stc1.__lte__(stc2)
+    # stc1 has more clients -> stc1 is NOT lte stc2
+    async with stc1.acquire():
+        assert not stc1.__lte__(stc2)
+        assert stc2.__lte__(stc1)
+
+
+def test_lifetime_no_created_ts():
+    """Cover lifetime returning 0 when connection_created_ts is None"""
+    stc = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    assert stc.lifetime == 0
+
+
+async def test_checkout_cleanup_on_failed_readiness():
+    """Cover lines 320-324: cleanup after check_readiness raises"""
+
+    class FailReadyConnector(cp.AbstractorConnector):
+        async def create(self):
+            return FakeConn()
+
+        async def ready(self, _conn):
+            raise RuntimeError("readiness failed")
+
+    stc = cp.SharedTransportConnection(
+        FailReadyConnector(), client_limit=2, max_idle_seconds=10
+    )
+    with pytest.raises(RuntimeError, match="readiness failed"):
+        await stc.checkout()
+    # Connection should be cleaned up
+    assert stc._connection is None
+    assert not stc.is_ready
+
+
+async def test_reset_connection_close_exception():
+    """Cover lines 408-409: _reset_connection when close raises"""
+    stc = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=2, max_idle_seconds=10
+    )
+    await stc.create()
+    # Make connection close raise
+    stc._connection.close = mock.AsyncMock(side_effect=Exception("close failed"))
+    await stc._reset_connection()
+    # Should still reset state
+    assert stc._connection is None
+    assert not stc.is_ready
+
+
+async def test_check_readiness_failure():
+    """Cover lines 434-435: ready returns False -> ConnectionFailed"""
+
+    class NotReadyConnector(cp.AbstractorConnector):
+        async def create(self):
+            return FakeConn()
+
+        async def ready(self, _conn):
+            return False
+
+    stc = cp.SharedTransportConnection(
+        NotReadyConnector(), client_limit=2, max_idle_seconds=10
+    )
+    await stc.create()
+    with pytest.raises(cp.ConnectionFailed):
+        await stc.check_readiness()
+    # Connection should be cleaned up
+    assert stc._connection is None
 
 
 async def test_send_time_deco_basic():

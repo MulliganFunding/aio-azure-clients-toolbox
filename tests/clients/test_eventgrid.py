@@ -47,3 +47,36 @@ async def test_async_emit_event(mockegrid, async_client):
     await async_client.async_emit_event("test", "event", "subect", {"data": "true"})
     assert async_client.get_async_client("test")
     assert mock_async.send.called, "The send method was not called."
+
+
+def test_no_credential_raises():
+    config = eventgrid.EventGridConfig(eventgrid.EventGridTopicConfig("t", "url"))
+    with pytest.raises(ValueError, match="Must provide credential or async_credential"):
+        eventgrid.EventGridClient(config)
+
+
+def test_both_credentials_raises():
+    config = eventgrid.EventGridConfig(eventgrid.EventGridTopicConfig("t", "url"))
+    with pytest.raises(ValueError, match="Must provide only ONE"):
+        eventgrid.EventGridClient(config, credential=mock.Mock(), async_credential=mock.AsyncMock())
+
+
+def test_init_clients_without_credential():
+    config = eventgrid.EventGridConfig(eventgrid.EventGridTopicConfig("t", "url"))
+    client = eventgrid.EventGridClient(config, async_credential=mock.AsyncMock())
+    # _init_clients guard
+    with pytest.raises(ValueError, match="credential must be provided to init sync clients"):
+        client._init_clients()
+
+
+def test_init_async_clients_without_async_credential():
+    config = eventgrid.EventGridConfig(eventgrid.EventGridTopicConfig("t", "url"))
+    client = eventgrid.EventGridClient(config, credential=mock.Mock())
+    # _init_async_clients guard
+    with pytest.raises(ValueError, match="async_credential must be provided to init async clients"):
+        client._init_async_clients()
+
+
+def test_is_sync(sync_client, async_client):
+    assert sync_client.is_sync() is True
+    assert async_client.is_sync() is False

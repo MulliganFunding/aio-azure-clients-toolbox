@@ -192,3 +192,85 @@ async def test_list_blobs(absc, mock_azureblob):
     blob_names = [b.name async for b in absc.list_blobs()]
     assert len(blob_names) == 3
     assert blob_names == ["some-blob", "some-blob2", "some-blob3"]
+
+
+def test_chop_starting_dot_no_dot():
+    assert azure_blobs.chop_starting_dot("hello") == "hello"
+
+
+def test_chop_trailing_dot_no_dot():
+    assert azure_blobs.chop_trailing_dot("hello") == "hello"
+
+
+def test_container_name_leading_slash(mock_azureblob):
+    client = azure_blobs.AzureBlobStorageClient("http://localhost:8000", "/test-container", mock.AsyncMock())
+    assert client.container_name == "test-container"
+
+
+async def test_upload_blob_from_url(absc, mock_azureblob):
+    _, mockblobc, _ = mock_azureblob
+    mockblobc.upload_blob_from_url = mock.AsyncMock(return_value={"etag": "0x123"})
+    result = await absc.upload_blob_from_url("dest-blob", "https://source.example.com/blob")
+    assert result == {"etag": "0x123"}
+    mockblobc.upload_blob_from_url.assert_called_once_with("https://source.example.com/blob", overwrite=True)
+
+
+async def test_download_blob_side_effect_list(absc, mock_azureblob):
+    """Covers set_download_return with side_effect as a list"""
+    _, _, set_return = mock_azureblob
+    set_return.download_blob_returns(b"DEFAULT", side_effect=[b"FIRST", b"SECOND"])
+    result1 = await absc.download_blob("blob1")
+    assert result1 == b"FIRST"
+    result2 = await absc.download_blob("blob2")
+    assert result2 == b"SECOND"
+
+
+async def test_download_blob_side_effect_exception(absc, mock_azureblob):
+    """Covers set_download_return with non-list side_effect (exception on async iter)"""
+    _, _, set_return = mock_azureblob
+    set_return.download_blob_returns(b"DEFAULT", side_effect=RuntimeError("boom"))
+    # The side_effect is set on the async iter, which would raise on iteration
+    # but readall still works because it's a separate mock
+    result = await absc.download_blob("blob")
+    assert result == b"DEFAULT"
+
+
+async def test_async_iter_aiter_exception():
+    """Covers AsyncIterImplementation.__aiter__ with exception side_effect"""
+    from aio_azure_clients_toolbox.testing_utils.fixtures import AsyncIterImplementation
+    ai = AsyncIterImplementation()
+    ai.side_effect = ValueError("test error")
+    with pytest.raises(ValueError, match="test error"):
+        async for _ in ai:
+            pass
+
+
+async def test_async_iter_call_method():
+    """Covers AsyncIterImplementation._call__ method"""
+    from aio_azure_clients_toolbox.testing_utils.fixtures import AsyncIterImplementation
+    ai = AsyncIterImplementation()
+    ai.return_value = "hello"
+    result = await ai._call__()
+    assert result == "hello"
+
+    # With exception side_effect
+    ai2 = AsyncIterImplementation()
+    ai2.side_effect = RuntimeError("boom")
+    with pytest.raises(RuntimeError, match="boom"):
+        await ai2._call__()
+
+    # With iterable side_effect
+    ai3 = AsyncIterImplementation()
+    ai3.side_effect = [1, 2, 3]
+    ai3.return_value = "fallback"
+    result = await ai3._call__()
+    assert result == "fallback"
+
+
+async def test_get_blob_client_empty_url(mock_azureblob):
+    client = azure_blobs.AzureBlobStorageClient("http://x/", "container", mock.AsyncMock())
+    # Force az_storage_url to empty to trigger the guard
+    client.az_storage_url = ""
+    with pytest.raises(AttributeError, match="improperly configured"):
+        async with client.get_blob_client("blob"):
+            pass

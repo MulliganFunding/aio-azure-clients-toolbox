@@ -269,3 +269,176 @@ def test_operation_move_dataclass():
     op = cosmos.Operation(cosmos.PatchOp.Move, "/from", "/to")
     op_dict = op.as_op()
     assert op_dict == {"op": "move", "from": "/from", "path": "/to"}
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> ConnectionManager validation <--**---
+# # # # # # # # # # # # # # # # # #
+
+
+def test_connection_manager_bad_credential():
+    with pytest.raises(ValueError, match="credential_factory must be a callable"):
+        cosmos.ConnectionManager(
+            "https://example.com", "db", "container",
+            credential_factory="not-callable",
+        )
+
+
+def test_connection_manager_lifespan_zero():
+    with pytest.raises(ValueError, match="Bad value for client lifespan"):
+        cosmos.ConnectionManager(
+            "https://example.com", "db", "container",
+            credential_factory=lambda: mock.AsyncMock(),
+            lifespan_enabled=True,
+            cosmos_client_ttl_seconds=0,
+        )
+
+
+def test_connection_manager_lifespan_not_int():
+    with pytest.raises(ValueError, match="Bad value for client lifespan"):
+        cosmos.ConnectionManager(
+            "https://example.com", "db", "container",
+            credential_factory=lambda: mock.AsyncMock(),
+            lifespan_enabled=True,
+            cosmos_client_ttl_seconds=1.5,
+        )
+
+
+def test_connection_manager_lifespan_negative():
+    with pytest.raises(ValueError, match="Client lifespan must be positive"):
+        cosmos.ConnectionManager(
+            "https://example.com", "db", "container",
+            credential_factory=lambda: mock.AsyncMock(),
+            lifespan_enabled=True,
+            cosmos_client_ttl_seconds=-5,
+        )
+
+
+async def test_connection_manager_lifespan_recycle():
+    """Test should_recycle_container when lifespan_enabled and _client_lifespan_started is None"""
+    cm = cosmos.ConnectionManager(
+        "https://example.com", "db", "container",
+        credential_factory=lambda: mock.AsyncMock(),
+        lifespan_enabled=True,
+        cosmos_client_ttl_seconds=60,
+    )
+    # Container is closed -> should_recycle_container is True
+    assert cm.should_recycle_container
+    # Get a container to set everything up
+    await cm.get_container_client()
+    # Now it should NOT need recycling (just created)
+    assert not cm.should_recycle_container
+    # Force lifespan_started to None
+    cm._client_lifespan_started = None
+    assert cm.should_recycle_container
+
+
+async def test_connection_manager_recycle_credential_exception():
+    """Test recycle_container when credential.close() raises"""
+    cm = cosmos.ConnectionManager(
+        "https://example.com", "db", "container",
+        credential_factory=lambda: mock.AsyncMock(),
+    )
+    await cm.get_container_client()
+    # Make credential close raise
+    cm._credential.close = mock.AsyncMock(side_effect=Exception("cred close failed"))
+    # Should not raise, just log warning
+    await cm.recycle_container()
+    assert cm._client is None
+
+
+async def test_connection_manager_aenter_error():
+    """Test __aenter__ wraps CosmosHttpResponseError"""
+    from azure.cosmos import exceptions as cosmos_exceptions
+
+    cm = cosmos.ConnectionManager(
+        "https://example.com", "db", "container",
+        credential_factory=lambda: mock.AsyncMock(),
+    )
+    # Make get_container_client raise
+    cm.get_container_client = mock.AsyncMock(
+        side_effect=cosmos_exceptions.CosmosHttpResponseError(message="fail"),
+    )
+    with pytest.raises(ValueError, match="Container client cannot be constructed"):
+        async with cm:
+            pass
+
+
+async def test_connection_manager_aexit_recycles():
+    """Test __aexit__ recycles when should_recycle_container"""
+    cm = cosmos.ConnectionManager(
+        "https://example.com", "db", "container",
+        credential_factory=lambda: mock.AsyncMock(),
+        lifespan_enabled=True,
+        cosmos_client_ttl_seconds=60,
+    )
+    async with cm as _client:
+        # Force should_recycle on exit
+        cm._client_lifespan_started = None
+    # After exit, container should be recycled
+    assert cm._client is None
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> SimpleCosmos close credential exception <--**---
+# # # # # # # # # # # # # # # # # #
+
+
+async def test_simple_cosmos_close_credential_exception():
+    client = cosmos.SimpleCosmos(
+        "https://example.com", "db", "container",
+        mock.AsyncMock(),
+    )
+    await client.get_container_client()
+    client.credential.close = mock.AsyncMock(side_effect=Exception("cred close fail"))
+    # Should not raise, just log
+    await client.close()
+    assert client._client is None
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> ManagedCosmos validation & ready <--**---
+# # # # # # # # # # # # # # # # # #
+
+
+def test_managed_cosmos_bad_credential():
+    with pytest.raises(ValueError, match="credential_factory must be a callable"):
+        cosmos.ManagedCosmos(
+            "https://example.com", "db", "container",
+            credential_factory="not-callable",
+        )
+
+
+_real_managed_cosmos_ready = cosmos.ManagedCosmos.ready
+
+
+async def test_managed_cosmos_ready(monkeypatch):
+    """Test ManagedCosmos.ready() succeeds — restores real method to bypass autouse mock"""
+    from azure.cosmos.aio import ContainerProxy
+
+    monkeypatch.setattr(cosmos.ManagedCosmos, "ready", _real_managed_cosmos_ready)
+    client = cosmos.ManagedCosmos(
+        "https://example.com", "db", "container",
+        credential_factory=lambda: mock.AsyncMock(),
+    )
+    container = mock.AsyncMock(spec=ContainerProxy)
+    result = await client.ready(container)
+    assert result is True
+    container.read.assert_called_once()
+
+
+async def test_managed_cosmos_ready_failure(monkeypatch):
+    """Test ManagedCosmos.ready() fails after retries"""
+    from azure.cosmos import exceptions as cosmos_exceptions
+    from azure.cosmos.aio import ContainerProxy
+
+    monkeypatch.setattr(cosmos.ManagedCosmos, "ready", _real_managed_cosmos_ready)
+    client = cosmos.ManagedCosmos(
+        "https://example.com", "db", "container",
+        credential_factory=lambda: mock.AsyncMock(),
+    )
+    container = mock.AsyncMock(spec=ContainerProxy)
+    container.read.side_effect = cosmos_exceptions.CosmosHttpResponseError(message="fail")
+    result = await client.ready(container)
+    assert result is False
+    assert container.read.call_count == 2
