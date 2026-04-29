@@ -1,11 +1,11 @@
 from unittest import mock
 
-from azure.identity import DefaultAzureCredential
 import pytest
 from azure.cosmos import aio as az_cosmos_client
 from azure.eventgrid import EventGridPublisherClient
 from azure.eventgrid.aio import EventGridPublisherClient as AsyncEventGridPublisherClient
 from azure.eventhub.aio import EventHubProducerClient
+from azure.identity import DefaultAzureCredential
 from azure.servicebus.aio import ServiceBusClient
 from azure.storage.blob.aio import BlobClient, BlobServiceClient, ContainerClient
 
