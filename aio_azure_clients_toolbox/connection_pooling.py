@@ -397,9 +397,10 @@ class SharedTransportConnection:
     async def _reset_connection(self) -> None:
         """Close the underlying transport and reset to initial state.
 
-        Callers that already hold _open_close_lock must pass the connection
-        to close directly and reset attributes inline — this helper acquires
-        no lock itself, so it is safe to call from within a locked context.
+        This helper operates on ``self._connection`` directly and does not
+        acquire ``_open_close_lock`` itself. It is therefore safe to call
+        while already holding ``_open_close_lock``, and callers from unlocked
+        contexts are responsible for taking any synchronization they require.
         """
         if self._connection is not None:
             try:
@@ -498,6 +499,8 @@ class ConnectionPool:
         # Limit concurrent connection creation across all pool slots
         if max_concurrent_creates is None:
             max_concurrent_creates = max(max_size // 3, 1)
+        if max_concurrent_creates < 1:
+            raise ValueError("max_concurrent_creates must be a positive integer")
         self._creation_semaphore = anyio.Semaphore(max_concurrent_creates)
 
         # A pool is just a heap of connection-managing things
