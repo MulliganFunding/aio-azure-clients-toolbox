@@ -167,7 +167,7 @@ class AzureBlobStorageClient:
             bytes: *ALL* bytes of the blob.
         """
         async with self.get_blob_download_stream(blob_name, **kwargs) as stream:
-            return await stream.readall()  # type: ignore
+            return await stream.readall()
 
     async def download_blob_to_dir(self, workspace_dir: str, blob_name: str, **kwargs) -> str:
         """
@@ -237,7 +237,7 @@ class AzureBlobStorageClient:
             result = await client.upload_blob(
                 file_data,
                 blob_type="BlockBlob",
-                **kwargs,  # type: ignore
+                **kwargs,
             )
 
         if result.get("error_code") is not None:
@@ -411,7 +411,7 @@ class AzureBlobStorageClient:
         """
         return BlobServiceClient(
             self.az_storage_url,
-            credential=self.credentials,  # type: ignore
+            credential=self.credentials,
         )
 
     @asynccontextmanager
@@ -432,6 +432,6 @@ class AzureBlobStorageClient:
         async with self.get_blob_service_client() as blob_service_client:
             client = blob_service_client.get_blob_client(self.container_name, blob_name)
             try:
-                yield client  # type: ignore
+                yield client
             except HttpResponseError as exc:
                 raise AzureBlobError(exc) from exc

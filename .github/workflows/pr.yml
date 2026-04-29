@@ -4,32 +4,30 @@ on:
     branches:
       - main
     paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '*.rst'
+      - "docs/**"
+      - "*.md"
+      - "*.rst"
 jobs:
   tests:
     env:
       COVERAGE_DIR: ${{ format('/tmp/coverage/{0}', github.run_id) }}
     permissions:
-        checks: write
-        contents: read
-        pull-requests: write
+      checks: write
+      contents: read
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
 
-      - uses: "actions/setup-python@v4"
-        with:
-          python-version: "3.12"
-
       - name: Set up uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
 
       - name: Check out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "bootstrap"
         run: |
@@ -39,6 +37,10 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           just check
+      - name: Code quality checks
+        run: |
+          cd ${{ github.workspace }}
+          just check-types
       - name: Run tests
         run: |
           cd ${{ github.workspace }}
@@ -56,7 +58,7 @@ jobs:
           hide_complexity: true
           indicators: true
           output: both
-          thresholds: '92 92'
+          thresholds: "92 92"
 
       - name: Add Coverage PR Comment
         uses: marocchino/sticky-pull-request-comment@v2

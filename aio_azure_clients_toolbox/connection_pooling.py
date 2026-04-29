@@ -305,9 +305,8 @@ class SharedTransportConnection:
             self._connection = await self.create()
             # Make sure connection is ready. If we are cancelled (e.g. by
             # move_on_after in acquire()) between create() and the completion
-            # of check_readiness(), the connection would be left with an open
-            # transport/aiohttp session but _ready never set — a permanent
-            # zombie. The finally block detects this and cleans up.
+            # of check_readiness(), this connection could be left with an open
+            # transport/aiohttp session but _ready is never set.
             try:
                 await self.check_readiness()
             except BaseException:
@@ -408,8 +407,8 @@ class SharedTransportConnection:
                 if is_ready:
                     self._ready.set()
                 else:
-                    # Close the partially-open connection so its aiohttp session
-                    # and AMQP transport are released before we raise.
+                    # Close the partially-open connection so any aiohttp sessions
+                    # and/or AMQP transports are released before we raise.
                     # We cannot call self.close() here because we already hold
                     # _open_close_lock, so we perform the reset inline.
                     try:

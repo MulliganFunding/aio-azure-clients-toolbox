@@ -4,7 +4,7 @@ _default:
     just --list
 
 # Install dependencies used by this project
-bootstrap default="3.12":
+bootstrap default="3.13":
     uv venv --python {{default}}
     just sync
 
@@ -25,10 +25,10 @@ check:
     #!/bin/bash -eux
     uv run ruff check aio_azure_clients_toolbox tests
 
-# Run mypy checks
+# Run ty checks
 check-types:
     #!/bin/bash -eux
-    uv run mypy aio_azure_clients_toolbox
+    uv run ty check aio_azure_clients_toolbox
 
 # Run all tests locally
 test *args:

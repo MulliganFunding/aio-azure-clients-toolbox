@@ -75,7 +75,7 @@ class AzureServiceBus:
         self.credential_factory = credential_factory
         self._receiver_client: ServiceBusReceiver | None = None
         self._receiver_credential: DefaultAzureCredential | None = None
-        self._sender_client: SendClientCloseWrapper | None = None
+        self._sender_client: SendClientCloseWrapper | ServiceBusSender | None = None
         self._socket_timeout: float = socket_timeout
 
 
@@ -93,6 +93,7 @@ class AzureServiceBus:
             self._receiver_credential = credential
             sbc = ServiceBusClient(self.namespace_url, credential)
         else:
+            assert self.connection_string is not None
             sbc = ServiceBusClient.from_connection_string(self.connection_string)
 
         self._receiver_client = sbc.get_queue_receiver(
@@ -102,7 +103,7 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    def get_sender(self) -> SendClientCloseWrapper | ServiceBusClient:
+    def get_sender(self) -> SendClientCloseWrapper | ServiceBusSender:
         if self._sender_client is not None:
             return self._sender_client
 
@@ -112,6 +113,7 @@ class AzureServiceBus:
             sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
             self._sender_client = SendClientCloseWrapper(sender_client, credential)
         else:
+            assert self.connection_string is not None
             sbc = ServiceBusClient.from_connection_string(self.connection_string)
             self._sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
 
@@ -225,7 +227,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             self.credential_factory,
             connection_string=self.connection_string,
         )
-        return client.get_sender()
+        return cast(SendClientCloseWrapper, client.get_sender())
 
     async def create(self) -> connection_pooling.AbstractConnection:
         """Creates a new connection for our pool"""
