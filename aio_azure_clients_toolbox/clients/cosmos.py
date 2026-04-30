@@ -290,6 +290,9 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         Timeout for creating a connection in the pool (default: 10 seconds).
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
+      max_concurrent_creates:
+        Max number of connections that can be created simultaneously across all
+        pool slots. Defaults to ``max(max_size // 3, 1)``.
     """
 
     MatchConditions = MatchConditions
@@ -306,6 +309,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
         max_lifespan_seconds: int = CLIENT_TTL_SECONDS_DEFAULT,
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
+        max_concurrent_creates: int | None = None,
     ):
         self.endpoint = endpoint
         self.dbname = dbname
@@ -322,6 +326,7 @@ class ManagedCosmos(connection_pooling.AbstractorConnector):
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
+            max_concurrent_creates=max_concurrent_creates,
         )
         self.pool_kwargs = {
             "timeout": pool_get_timeout,

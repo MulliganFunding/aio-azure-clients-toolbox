@@ -112,15 +112,20 @@ class EventGridClient:
             self.credential = credential
             self._init_clients()
         else:
+            assert async_credential, "async_credential must be provided if credential is not provided"
             self.async_credential = async_credential
             self._init_async_clients()
 
     def _init_clients(self):
+        if not self.credential:
+            raise ValueError("credential must be provided to init sync clients")
         self.clients = {}
         for topic in self.config.topics():
             self.clients[topic] = EventGridPublisherClient(self.config.url(topic), self.credential)
 
     def _init_async_clients(self):
+        if not self.async_credential:
+            raise ValueError("async_credential must be provided to init async clients")
         self.async_clients = {}
         for topic in self.config.topics():
             self.async_clients[topic] = AsyncEventGridPublisherClient(

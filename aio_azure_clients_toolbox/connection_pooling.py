@@ -27,7 +27,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from functools import total_ordering, wraps
 
 import anyio
@@ -157,6 +157,7 @@ class SharedTransportConnection:
         "connection_created_ts",
         "_connector",
         "_connection",
+        "_creation_semaphore",
         "_open_close_lock",
         "_id",
         "_ready",
@@ -169,6 +170,7 @@ class SharedTransportConnection:
         client_limit: int = DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_lifespan_seconds: int | None = None,
         max_idle_seconds: int = DEFAULT_CONNECTION_MAX_IDLE_SECONDS,
+        creation_semaphore: anyio.Semaphore | None = None,
     ) -> None:
         # When was this connection created
         self.connection_created_ts: int | None = None
@@ -191,6 +193,7 @@ class SharedTransportConnection:
 
         self._connector: AbstractorConnector = connector
         self._connection: AbstractConnection | None = None
+        self._creation_semaphore: anyio.Semaphore | None = creation_semaphore
         self._open_close_lock: anyio.Lock = anyio.Lock()
         self._id = (binascii.hexlify(os.urandom(3))).decode()
         self._ready = anyio.Event()
@@ -302,11 +305,23 @@ class SharedTransportConnection:
             await self.close()
 
         if not self._connection:
-            self._connection = await self.create()
-            # Make sure connection is ready
-            # one thing we could do here is yield the connection and set our event after
-            # the *first* successful usage, but defining that success is tougher...?
-            await self.check_readiness()
+            # Acquire the pool-level creation semaphore (if configured) to
+            # limit how many connections open simultaneously across all slots.
+            # This must be inside the move_on_after scope (via acquire()) so
+            # that cancellation unwinds the semaphore wait rather than blocking.
+            async with self._creation_semaphore if self._creation_semaphore else nullcontext():
+                self._connection = await self.create()
+                # Make sure connection is ready. If we are cancelled (e.g. by
+                # move_on_after in acquire()) between create() and the completion
+                # of check_readiness(), this connection could be left with an open
+                # transport/aiohttp session but _ready is never set.
+                try:
+                    await self.check_readiness()
+                except BaseException:
+                    if self._connection is not None and not self._ready.is_set():
+                        logger.debug(f"[checkout {self}] Cleaning up connection after failed/cancelled readiness")
+                        await self._reset_connection()
+                    raise
 
         self.last_idle_start = None
 
@@ -379,6 +394,25 @@ class SharedTransportConnection:
         """Proxy for whether our readiness Event has been set."""
         return self._ready.is_set()
 
+    async def _reset_connection(self) -> None:
+        """Close the underlying transport and reset to initial state.
+
+        This helper operates on ``self._connection`` directly and does not
+        acquire ``_open_close_lock`` itself. It is therefore safe to call
+        while already holding ``_open_close_lock``, and callers from unlocked
+        contexts are responsible for taking any synchronization they require.
+        """
+        if self._connection is not None:
+            try:
+                await self._connection.close()
+            except Exception:
+                pass
+        self._should_close = False
+        self._connection = None
+        self._ready = anyio.Event()
+        self.last_idle_start = None
+        self.connection_created_ts = None
+
     async def check_readiness(self) -> None:
         """Indicates when ready by waiting for the connector to signal"""
         if self._ready.is_set():
@@ -393,6 +427,11 @@ class SharedTransportConnection:
                 if is_ready:
                     self._ready.set()
                 else:
+                    # Close the partially-open connection so any aiohttp sessions
+                    # and/or AMQP transports are released before we raise.
+                    # We already hold _open_close_lock, but _reset_connection
+                    # does not acquire it, so this is safe.
+                    await self._reset_connection()
                     raise ConnectionFailed(f"{self} Failed readying connection")
 
     @property
@@ -413,18 +452,7 @@ class SharedTransportConnection:
         # We use a lock on *closing* a connection
         async with self._open_close_lock:
             logger.debug(f"[close {self}] Closing the Connection")
-            try:
-                await self._connection.close()
-            except Exception:
-                pass
-
-            # Reset attributes to initial state
-            self._should_close = False
-            self._connection = None
-            self._ready = anyio.Event()
-            self.last_idle_start = None
-            if self.max_lifespan_ns is not None:
-                self.connection_created_ts = None
+            await self._reset_connection()
 
 
 class ConnectionPool:
@@ -445,6 +473,10 @@ class ConnectionPool:
         Maximum duration allowed for an idle connection before recylcing it.
       max_lifespan_seconds:
         Optional setting which controls how long a connection live before recycling.
+      max_concurrent_creates:
+        Max number of connections that can be created simultaneously across all
+        pool slots. Limits thundering-herd connection storms under bursty workloads.
+        Set to ``max_size`` to recover unlimited (previous) behaviour.
     """
 
     def __init__(
@@ -454,6 +486,7 @@ class ConnectionPool:
         max_size: int = DEFAULT_MAX_SIZE,
         max_idle_seconds: int = DEFAULT_CONNECTION_MAX_IDLE_SECONDS,
         max_lifespan_seconds: int | None = None,
+        max_concurrent_creates: int | None = None,
     ):
         # Each shared connection allows up to this many connections
         self.client_limit = client_limit
@@ -463,6 +496,13 @@ class ConnectionPool:
             raise ValueError("max_size must a postive integer")
         self.connector = connector
 
+        # Limit concurrent connection creation across all pool slots
+        if max_concurrent_creates is None:
+            max_concurrent_creates = max(max_size // 3, 1)
+        if max_concurrent_creates < 1:
+            raise ValueError("max_concurrent_creates must be a positive integer")
+        self._creation_semaphore = anyio.Semaphore(max_concurrent_creates)
+
         # A pool is just a heap of connection-managing things
         # All synchronization primitives are in the connections
         self._pool = [
@@ -471,6 +511,7 @@ class ConnectionPool:
                 client_limit=self.client_limit,
                 max_idle_seconds=max_idle_seconds,
                 max_lifespan_seconds=max_lifespan_seconds,
+                creation_semaphore=self._creation_semaphore,
             )
             for _ in range(self.max_size)
         ]
@@ -513,6 +554,16 @@ class ConnectionPool:
                             break
                 elif shareable_conn.closeable:
                     logger.debug(f"[ConnPool] {shareable_conn} Closing expired connection")
+                    await shareable_conn.close()
+                elif (
+                    shareable_conn._connection is not None
+                    and not shareable_conn.is_ready
+                    and shareable_conn.current_client_count == 0
+                ):
+                    # Stuck connection: has an open transport but readiness
+                    # was never established (e.g. cancelled during checkout).
+                    # Close it so the slot can be reused.
+                    logger.debug(f"[ConnPool] {shareable_conn} Closing stuck connection (open but not ready)")
                     await shareable_conn.close()
 
             # Arbitrary async yield to avoid busy loop

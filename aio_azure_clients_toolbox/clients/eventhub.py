@@ -1,5 +1,6 @@
 import logging
 import traceback
+from typing import Any, cast
 
 from azure.eventhub import EventData, EventDataBatch, TransportType
 from azure.eventhub.aio import EventHubProducerClient
@@ -55,7 +56,7 @@ class Eventhub:
             fully_qualified_namespace=self.evhub_namespace,
             eventhub_name=self.evhub_name,
             credential=self.credential,
-            **self.transport_type,
+            **cast(Any, self.transport_type),
         )
 
     @property
@@ -183,6 +184,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         Timeout for creating a connection in the pool (default: 10 seconds).
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
+      max_concurrent_creates:
+        Max number of connections that can be created simultaneously across all
+        pool slots. Defaults to ``max(max_size // 3, 1)``.
       ready_message:
         A string, bytes, or EventData object representing the first "ready" message sent to establish connection.
     """
@@ -200,6 +204,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         max_lifespan_seconds: int | None = None,
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
+        max_concurrent_creates: int | None = None,
     ):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
@@ -215,6 +220,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
+            max_concurrent_creates=max_concurrent_creates,
         )
         if not isinstance(ready_message, (str, bytes, EventData)):
             raise ValueError("ready_message must be a string, bytes, or EventData")
@@ -225,14 +231,14 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             "acquire_timeout": pool_connection_create_timeout,
         }
 
-    async def create(self) -> Eventhub:
+    async def create(self) -> connection_pooling.AbstractConnection:
         """Creates a new connection for our pool"""
-        return Eventhub(
+        return cast(connection_pooling.AbstractConnection, Eventhub(
             self.eventhub_namespace,
             self.eventhub_name,
             self.credential_factory(),
             eventhub_transport_type=self.eventhub_transport_type,
-        )
+        ))
 
     async def close(self):
         """Closes all connections in our pool"""
@@ -283,8 +289,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         then you can ensure that a _particular consumer_ always receives _those_ events.
         """
         async with self.pool.get(**self.pool_kwargs) as conn:
+            evhub_conn = cast(Eventhub, conn)
             # Create a batch.
-            event_data_batch: EventDataBatch = await conn.create_batch(partition_key=partition_key)
+            event_data_batch: EventDataBatch = await evhub_conn.create_batch(partition_key=partition_key)
 
             # Add events to the batch.
             event_data_batch.add(event)
@@ -292,7 +299,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
             try:
-                await conn.send_batch(event_data_batch)
+                await evhub_conn.send_batch(event_data_batch)
                 return event_data_batch
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending event: {event}")
@@ -318,8 +325,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         then you can ensure that a _particular consumer_ always receives _those_ events.
         """
         async with self.pool.get(**self.pool_kwargs) as conn:
+            evhub_conn = cast(Eventhub, conn)
             # Create a batch.
-            event_data_batch: EventDataBatch = await conn.create_batch(partition_key=partition_key)
+            event_data_batch: EventDataBatch = await evhub_conn.create_batch(partition_key=partition_key)
 
             # Add events to the batch.
             event_data_batch.add(EventData(event))
@@ -328,9 +336,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
 
             try:
                 # Send the batch of events to the event hub.
-                await conn.send_batch(event_data_batch)
+                await evhub_conn.send_batch(event_data_batch)
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
-                logger.error(f"Error sending event: {event}")
+                logger.error(f"Error sending event: {event!r}")
                 logger.error(f"{traceback.format_exc()}")
                 # Mark this connection closed so it won't be reused
                 await self.pool.expire_conn(conn)
@@ -353,8 +361,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         then you can ensure that a _particular consumer_ always receives _those_ events.
         """
         async with self.pool.get(**self.pool_kwargs) as conn:
+            evhub_conn = cast(Eventhub, conn)
             # Create a batch.
-            event_data_batch: EventDataBatch = await conn.create_batch(partition_key=partition_key)
+            event_data_batch: EventDataBatch = await evhub_conn.create_batch(partition_key=partition_key)
 
             # Add events to the batch.
             for event in events_list:
@@ -363,7 +372,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
             try:
-                await conn.send_batch(event_data_batch)
+                await evhub_conn.send_batch(event_data_batch)
                 return event_data_batch
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending event: {traceback.format_exc()}")
@@ -380,10 +389,11 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         Sending events in a batch is more performant than sending individual events.
         """
         async with self.pool.get(**self.pool_kwargs) as conn:
+            evhub_conn = cast(Eventhub, conn)
             logger.debug("Sending eventhub batch")
             # Send the batch of events to the event hub.
             try:
-                await conn.send_batch(event_data_batch)
+                await evhub_conn.send_batch(event_data_batch)
                 return event_data_batch
             except (AuthenticationError, ClientClosedError, ConnectionLostError, ConnectError):
                 logger.error(f"Error sending batch {traceback.format_exc()}")

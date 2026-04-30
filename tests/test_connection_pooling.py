@@ -1,6 +1,7 @@
 import asyncio
 import heapq
 import logging
+from unittest import mock
 
 import pytest
 from aio_azure_clients_toolbox import connection_pooling as cp
@@ -635,6 +636,91 @@ async def test_regression_semaphore_limits_enforced(
     assert len(deactivated_connections) <= client_count
 
 
+async def test_creation_semaphore_limits_concurrent_opens():
+    """Validates that the creation semaphore actually limits how many connections
+    open simultaneously. We use a slow connector (simulating real Azure SDK opens)
+    and assert that the peak concurrency never exceeds max_concurrent_creates."""
+    peak_concurrent = 0
+    current_concurrent = 0
+    lock = asyncio.Lock()
+
+    class InstrumentedSlowConnector(cp.AbstractorConnector):
+        async def create(self):
+            nonlocal peak_concurrent, current_concurrent
+            async with lock:
+                current_concurrent += 1
+                if current_concurrent > peak_concurrent:
+                    peak_concurrent = current_concurrent
+            await sleep(0.05)  # Simulate slow connection creation
+            conn = FakeConn()
+            async with lock:
+                current_concurrent -= 1
+            return conn
+
+        async def ready(self, _conn):
+            return True
+
+    max_concurrent = 2
+    pool_size = 6
+    pool = cp.ConnectionPool(
+        InstrumentedSlowConnector(),
+        client_limit=1,  # Force each slot to create its own connection
+        max_size=pool_size,
+        max_idle_seconds=10,
+        max_concurrent_creates=max_concurrent,
+    )
+
+    # Launch pool_size concurrent acquisitions — all slots must create
+    async def acquire_one():
+        async with pool.get(timeout=5) as conn:
+            assert conn is not None
+
+    with move_on_after(5.0) as timeout_scope:
+        async with create_task_group() as tg:
+            for _ in range(pool_size):
+                tg.start_soon(acquire_one)
+
+    assert not timeout_scope.cancel_called, "Deadlock in semaphore concurrency test"
+    assert peak_concurrent <= max_concurrent, (
+        f"Peak concurrent creates ({peak_concurrent}) exceeded limit ({max_concurrent})"
+    )
+    # Ensure we actually exercised concurrency (not just serialised by accident)
+    assert peak_concurrent >= 1, "Expected at least 1 concurrent create"
+
+    await pool.closeall()
+
+
+async def test_creation_semaphore_default_value():
+    """Validates the default max_concurrent_creates = max(max_size // 3, 1)"""
+    pool = cp.ConnectionPool(
+        FakeConnector(),
+        client_limit=CLIENT_LIMIT,
+        max_size=9,
+        max_idle_seconds=MAX_IDLE_SECONDS,
+    )
+    assert pool._creation_semaphore._value == 3  # 9 // 3
+
+    pool2 = cp.ConnectionPool(
+        FakeConnector(),
+        client_limit=CLIENT_LIMIT,
+        max_size=2,
+        max_idle_seconds=MAX_IDLE_SECONDS,
+    )
+    assert pool2._creation_semaphore._value == 1  # max(2 // 3, 1)
+
+
+def test_creation_semaphore_rejects_zero():
+    """max_concurrent_creates < 1 should raise ValueError"""
+    with pytest.raises(ValueError, match="max_concurrent_creates must be a positive integer"):
+        cp.ConnectionPool(
+            FakeConnector(),
+            client_limit=CLIENT_LIMIT,
+            max_size=CLIENT_LIMIT,
+            max_idle_seconds=MAX_IDLE_SECONDS,
+            max_concurrent_creates=0,
+        )
+
+
 async def test_regression_pool_heap_ordering():
     """Ensures pool still maintains proper heap ordering for connection freshness"""
     pool = cp.ConnectionPool(
@@ -666,6 +752,101 @@ async def test_regression_pool_heap_ordering():
 # # # # # # # # # # # # # # # # # #
 # ---**--> send_time_deco tests <--**---
 # # # # # # # # # # # # # # # # # #
+
+
+async def test_gte_comparison():
+    """Cover __gte__ method"""
+    stc1 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    stc2 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    # Same state -> GTE
+    assert stc1.__gte__(stc2)
+    # Different client counts
+    async with stc1.acquire():
+        # stc1 has more clients
+        assert stc1.__gte__(stc2)
+        assert not stc2.__gte__(stc1)
+
+
+async def test_lte_comparison():
+    """Cover __lte__ method"""
+    stc1 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    stc2 = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    # Same state -> LTE
+    assert stc1.__lte__(stc2)
+    # stc1 has more clients -> stc1 is NOT lte stc2
+    async with stc1.acquire():
+        assert not stc1.__lte__(stc2)
+        assert stc2.__lte__(stc1)
+
+
+def test_lifetime_no_created_ts():
+    """Cover lifetime returning 0 when connection_created_ts is None"""
+    stc = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=CLIENT_LIMIT, max_idle_seconds=MAX_IDLE_SECONDS
+    )
+    assert stc.lifetime == 0
+
+
+async def test_checkout_cleanup_on_failed_readiness():
+    """Cover lines 320-324: cleanup after check_readiness raises"""
+
+    class FailReadyConnector(cp.AbstractorConnector):
+        async def create(self):
+            return FakeConn()
+
+        async def ready(self, _conn):
+            raise RuntimeError("readiness failed")
+
+    stc = cp.SharedTransportConnection(
+        FailReadyConnector(), client_limit=2, max_idle_seconds=10
+    )
+    with pytest.raises(RuntimeError, match="readiness failed"):
+        await stc.checkout()
+    # Connection should be cleaned up
+    assert stc._connection is None
+    assert not stc.is_ready
+
+
+async def test_reset_connection_close_exception():
+    """Cover lines 408-409: _reset_connection when close raises"""
+    stc = cp.SharedTransportConnection(
+        FakeConnector(), client_limit=2, max_idle_seconds=10
+    )
+    await stc.create()
+    # Make connection close raise
+    stc._connection.close = mock.AsyncMock(side_effect=Exception("close failed"))
+    await stc._reset_connection()
+    # Should still reset state
+    assert stc._connection is None
+    assert not stc.is_ready
+
+
+async def test_check_readiness_failure():
+    """Cover lines 434-435: ready returns False -> ConnectionFailed"""
+
+    class NotReadyConnector(cp.AbstractorConnector):
+        async def create(self):
+            return FakeConn()
+
+        async def ready(self, _conn):
+            return False
+
+    stc = cp.SharedTransportConnection(
+        NotReadyConnector(), client_limit=2, max_idle_seconds=10
+    )
+    await stc.create()
+    with pytest.raises(cp.ConnectionFailed):
+        await stc.check_readiness()
+    # Connection should be cleaned up
+    assert stc._connection is None
 
 
 async def test_send_time_deco_basic():

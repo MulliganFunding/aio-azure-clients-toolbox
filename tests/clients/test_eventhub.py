@@ -99,6 +99,18 @@ async def test_close(ehub):
     await ehub.close()
 
 
+async def test_close_credential_exception(mockehub):
+    ehub = eventhub.Eventhub(
+        "namespace_url.example.net",
+        "name",
+        mock.AsyncMock(),  # credential
+    )
+    ehub.credential.close = mock.AsyncMock(side_effect=Exception("cred close fail"))
+    # Should not raise, just log
+    await ehub.close()
+    assert ehub._client is None
+
+
 async def test_evhub_send_event(ehub):
     await ehub.send_event("test")
     assert len(ehub._client.method_calls) == 3
@@ -220,6 +232,15 @@ async def test_managed_evhub_send_event_batch(mockehub_throwing, managed_ehub):
         assert (
             len(get_mock_connection_from_pool(managed_ehub.pool).method_calls)
             == expect_call_count
+        )
+
+
+def test_managed_bad_credential():
+    with pytest.raises(ValueError, match="credential_factory must be a callable"):
+        eventhub.ManagedAzureEventhubProducer(
+            "namespace_url.example.net",
+            "name",
+            credential_factory="not-callable",
         )
 
 

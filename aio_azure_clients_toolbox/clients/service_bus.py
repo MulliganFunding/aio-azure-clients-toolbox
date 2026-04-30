@@ -75,7 +75,7 @@ class AzureServiceBus:
         self.credential_factory = credential_factory
         self._receiver_client: ServiceBusReceiver | None = None
         self._receiver_credential: DefaultAzureCredential | None = None
-        self._sender_client: SendClientCloseWrapper | None = None
+        self._sender_client: SendClientCloseWrapper | ServiceBusSender | None = None
         self._socket_timeout: float = socket_timeout
 
 
@@ -93,6 +93,7 @@ class AzureServiceBus:
             self._receiver_credential = credential
             sbc = ServiceBusClient(self.namespace_url, credential)
         else:
+            assert self.connection_string is not None
             sbc = ServiceBusClient.from_connection_string(self.connection_string)
 
         self._receiver_client = sbc.get_queue_receiver(
@@ -102,7 +103,7 @@ class AzureServiceBus:
         )
         return self._receiver_client
 
-    def get_sender(self) -> SendClientCloseWrapper | ServiceBusClient:
+    def get_sender(self) -> SendClientCloseWrapper | ServiceBusSender:
         if self._sender_client is not None:
             return self._sender_client
 
@@ -112,6 +113,7 @@ class AzureServiceBus:
             sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
             self._sender_client = SendClientCloseWrapper(sender_client, credential)
         else:
+            assert self.connection_string is not None
             sbc = ServiceBusClient.from_connection_string(self.connection_string)
             self._sender_client = sbc.get_queue_sender(queue_name=self.queue_name, socket_timeout=self._socket_timeout)
 
@@ -175,6 +177,9 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
        Timeout for creating a connection in the pool (default: 10 seconds).
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
+      max_concurrent_creates:
+        Max number of connections that can be created simultaneously across all
+        pool slots. Defaults to ``max(max_size // 3, 1)``.
       ready_message:
         A string or bytes representing the first "ready" message sent to establish connection.
     """
@@ -192,6 +197,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
         connection_string: str | None = None,
+        max_concurrent_creates: int | None = None,
     ):
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
@@ -208,6 +214,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             max_size=max_size,
             max_idle_seconds=max_idle_seconds,
             max_lifespan_seconds=max_lifespan_seconds,
+            max_concurrent_creates=max_concurrent_creates,
         )
         if not isinstance(ready_message, (str, bytes)):
             raise ValueError("ready_message must be a string or bytes")
@@ -225,7 +232,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
             self.credential_factory,
             connection_string=self.connection_string,
         )
-        return client.get_sender()
+        return cast(SendClientCloseWrapper, client.get_sender())
 
     async def create(self) -> connection_pooling.AbstractConnection:
         """Creates a new connection for our pool"""

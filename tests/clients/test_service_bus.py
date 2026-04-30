@@ -1,4 +1,7 @@
+from unittest import mock
+
 import pytest
+from aio_azure_clients_toolbox.clients import service_bus
 from azure.servicebus.exceptions import (
     ServiceBusAuthenticationError,
     ServiceBusConnectionError,
@@ -134,3 +137,71 @@ async def test_managed_send_message_with_unique_msg_id(managed_sbus, mockservice
 
     scheduled_message = mockservicebus._sender.schedule_messages.call_args.args[0]
     assert scheduled_message.message_id == unique_msg_id
+
+
+# # # # # # # # # # # # # # # # # #
+# ---**--> Validation & edge cases <--**---
+# # # # # # # # # # # # # # # # # #
+def test_basic_sbus_no_credential_or_connection_string():
+    with pytest.raises(ValueError, match="credential_factory must be a callable"):
+        service_bus.AzureServiceBus(
+            "https://sbus.example.com",
+            "queue",
+        )
+
+
+def test_managed_sbus_no_credential_or_connection_string():
+    with pytest.raises(ValueError, match="credential_factory must be a callable"):
+        service_bus.ManagedAzureServiceBusSender(
+            "https://sbus.example.com",
+            "queue",
+        )
+
+
+def test_managed_sbus_bad_ready_message():
+    with pytest.raises(ValueError, match="ready_message must be a string or bytes"):
+        service_bus.ManagedAzureServiceBusSender(
+            "https://sbus.example.com",
+            "queue",
+            credential_factory=lambda: mock.AsyncMock(),
+            ready_message=12345,  # noqa: B033
+        )
+
+
+async def test_basic_sbus_connection_string_receiver(monkeypatch, mockservicebus):
+    mock_sbc = mock.MagicMock()
+    mock_sbc.get_queue_receiver = mock.PropertyMock(return_value=mock.AsyncMock())
+    mock_sbc.from_connection_string = mock.Mock(return_value=mock_sbc)
+    monkeypatch.setattr(service_bus, "ServiceBusClient", mock_sbc)
+
+    sbus = service_bus.AzureServiceBus(
+        "https://sbus.example.com",
+        "queue",
+        connection_string="Endpoint=sb://fake",
+    )
+    receiver = sbus.get_receiver()
+    assert receiver is not None
+    mock_sbc.from_connection_string.assert_called_once()
+
+
+async def test_basic_sbus_connection_string_sender(monkeypatch, mockservicebus):
+    mock_sbc = mock.MagicMock()
+    mock_sbc.get_queue_sender = mock.PropertyMock(return_value=mock.AsyncMock())
+    mock_sbc.from_connection_string = mock.Mock(return_value=mock_sbc)
+    monkeypatch.setattr(service_bus, "ServiceBusClient", mock_sbc)
+
+    sbus = service_bus.AzureServiceBus(
+        "https://sbus.example.com",
+        "queue",
+        connection_string="Endpoint=sb://fake",
+    )
+    sender = sbus.get_sender()
+    assert sender is not None
+    mock_sbc.from_connection_string.assert_called_once()
+
+
+async def test_managed_close_with_receiver(managed_sbus, mockservicebus):
+    """Test close() when a receiver has been created"""
+    _ = managed_sbus.get_receiver()
+    await managed_sbus.close()
+    assert managed_sbus._receiver_client is None

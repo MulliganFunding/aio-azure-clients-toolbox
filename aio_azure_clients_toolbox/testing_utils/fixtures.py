@@ -5,6 +5,7 @@ from azure.cosmos import aio as az_cosmos_client
 from azure.eventgrid import EventGridPublisherClient
 from azure.eventgrid.aio import EventGridPublisherClient as AsyncEventGridPublisherClient
 from azure.eventhub.aio import EventHubProducerClient
+from azure.identity.aio import DefaultAzureCredential
 from azure.servicebus.aio import ServiceBusClient
 from azure.storage.blob.aio import BlobClient, BlobServiceClient, ContainerClient
 
@@ -47,7 +48,7 @@ class AsyncIterImplementation:
         self._is_iter = None
 
     async def _call__(self):
-        if self.side_effect and isinstance(self.side, Exception):
+        if self.side_effect and isinstance(self.side_effect, Exception):
             raise self.side_effect
         if hasattr(self.side_effect, "__iter__"):
             self._is_iter = iter(self.side_effect)
@@ -80,7 +81,7 @@ def mocksas():
 
 
 @pytest.fixture(autouse=True)
-async def mock_azureblob(monkeypatch):  # type: ignore
+async def mock_azureblob(monkeypatch):
     """Mock out Azure Blob Service client and its children."""
     bsc = mock.MagicMock(BlobServiceClient)
     container_client = mock.MagicMock(ContainerClient)
@@ -140,7 +141,9 @@ async def mock_azureblob(monkeypatch):  # type: ignore
 
 @pytest.fixture()
 def absc(test_config, mock_azureblob):
-    return clients.azure_blobs.AzureBlobStorageClient(test_config.az_storage_url, mock.AsyncMock())
+    return clients.azure_blobs.AzureBlobStorageClient(
+        test_config.az_storage_url, "container", mock.MagicMock(DefaultAzureCredential)
+    )
 
 
 @pytest.fixture()
@@ -308,7 +311,7 @@ def cosmos_upsertable(async_cosmos):
 
 
 @pytest.fixture(autouse=True)
-def mockehub(monkeypatch):  # type: ignore
+def mockehub(monkeypatch):
     """Mock out Azure Blob Service client"""
     mockev = mock.MagicMock(spec=EventHubProducerClient)
     mockev.create_batch = mock.AsyncMock(return_value=mockev)
@@ -323,7 +326,7 @@ def mockehub(monkeypatch):  # type: ignore
 
 
 @pytest.fixture(autouse=True)
-def mockegrid(monkeypatch):  # type: ignore
+def mockegrid(monkeypatch):
     """Mock out Azure Eventgrid client"""
     mockeg = mock.MagicMock(spec=EventGridPublisherClient)
     mockeg.return_value = mockeg
@@ -337,7 +340,7 @@ def mockegrid(monkeypatch):  # type: ignore
 
 
 @pytest.fixture(autouse=True)
-def mockservicebus(monkeysession):  # type: ignore
+def mockservicebus(monkeysession):
     """Mock out Azure Blob Service client"""
     mocksb = mock.MagicMock(ServiceBusClient)
 
