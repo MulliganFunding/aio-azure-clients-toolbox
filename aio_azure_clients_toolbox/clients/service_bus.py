@@ -54,6 +54,20 @@ class AzureServiceBus:
     Basic AzureServiceBus client without connection pooling.
 
     For connection pooling see `ManagedAzureServiceBus` below.
+
+    Args:
+      service_bus_namespace_url:
+        String representing the ServiceBus namespace URL.
+      service_bus_queue_name:
+        Queue name.
+      credential_factory:
+        A callable that returns an async ``DefaultAzureCredential``.  Mutually
+        exclusive with ``connection_string``; exactly one must be supplied.
+      socket_timeout:
+        Socket timeout in seconds (default: 1).  Azure's own default is 0.2 s.
+      connection_string:
+        An Azure Service Bus connection string.  Mutually exclusive with
+        ``credential_factory``; exactly one must be supplied.
     """
 
     def __init__(
@@ -164,7 +178,8 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
       service_bus_queue_name:
         Queue name (the "topic").
       credential_factory:
-        A callable that returns an async DefaultAzureCredential which may be used to authenticate to the container.
+        A callable that returns an async ``DefaultAzureCredential``.  Mutually
+        exclusive with ``connection_string``; exactly one must be supplied.
       client_limit:
         Client limit per connection (default: 100).
       max_size:
@@ -174,7 +189,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
       max_lifespan_seconds:
         Optional setting which controls how long a connection lives before recycling.
       pool_connection_create_timeout:
-       Timeout for creating a connection in the pool (default: 10 seconds).
+        Timeout for creating a connection in the pool (default: 10 seconds).
       pool_get_timeout:
         Timeout for getting a connection from the pool (default: 60 seconds).
       max_concurrent_creates:
@@ -182,6 +197,9 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         pool slots. Defaults to ``max(max_size // 3, 1)``.
       ready_message:
         A string or bytes representing the first "ready" message sent to establish connection.
+      connection_string:
+        An Azure Service Bus connection string.  Mutually exclusive with
+        ``credential_factory``; exactly one must be supplied.
     """
 
     def __init__(

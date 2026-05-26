@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 
 
 class Eventhub:
+    """Low-level EventHub producer client without connection pooling.
+
+    For connection pooling see ``ManagedAzureEventhubProducer`` below.
+
+    Args:
+      eventhub_namespace:
+        Fully-qualified EventHub namespace hostname
+        (e.g. ``"myns.servicebus.windows.net"``).
+      eventhub_name:
+        EventHub name (the "topic").
+      credential:
+        An async ``DefaultAzureCredential`` instance.  Mutually exclusive with
+        ``connection_string``; exactly one must be supplied.
+      eventhub_transport_type:
+        Transport protocol.  Pass ``"amqp"`` (default) for pure AMQP or any
+        other value to use AMQP-over-WebSocket.
+      connection_string:
+        An Azure Event Hubs connection string.  Mutually exclusive with
+        ``credential``; exactly one must be supplied.
+    """
+
     __slots__ = [
         "connection_string",
         "credential",
@@ -186,7 +207,8 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       eventhub_name:
         Eventhub name (the "topic").
       credential_factory:
-        A callable that returns an async DefaultAzureCredential which may be used to authenticate to the container.
+        A callable that returns an async ``DefaultAzureCredential``.  Mutually
+        exclusive with ``connection_string``; exactly one must be supplied.
       client_limit:
         Client limit per connection (default: 100).
       max_size:
@@ -204,6 +226,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         pool slots. Defaults to ``max(max_size // 3, 1)``.
       ready_message:
         A string, bytes, or EventData object representing the first "ready" message sent to establish connection.
+      connection_string:
+        An Azure Event Hubs connection string.  Mutually exclusive with
+        ``credential_factory``; exactly one must be supplied.
     """
 
     def __init__(
