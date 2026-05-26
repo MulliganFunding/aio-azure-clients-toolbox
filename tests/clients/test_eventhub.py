@@ -244,6 +244,78 @@ def test_managed_bad_credential():
         )
 
 
+def test_managed_neither_credential_nor_connection_string():
+    """Neither credential_factory nor connection_string raises ValueError."""
+    with pytest.raises(ValueError, match="credential_factory must be a callable"):
+        eventhub.ManagedAzureEventhubProducer(
+            "namespace_url.example.net",
+            "name",
+        )
+
+
+def test_managed_connection_string(mockehub):
+    """ManagedAzureEventhubProducer can be constructed with a connection_string."""
+    producer = eventhub.ManagedAzureEventhubProducer(
+        "namespace_url.example.net",
+        "name",
+        connection_string="Endpoint=sb://fake.servicebus.windows.net/;SharedAccessKeyName=key;SharedAccessKey=abc",
+    )
+    assert producer.connection_string is not None
+    assert producer.credential_factory is None
+
+
+def test_eventhub_connection_string(monkeypatch):
+    """Eventhub.get_client uses from_connection_string when connection_string is set."""
+    from unittest import mock
+
+    from azure.eventhub.aio import EventHubProducerClient
+
+    fake_client = mock.MagicMock(spec=EventHubProducerClient)
+    from_conn_str = mock.MagicMock(return_value=fake_client)
+    monkeypatch.setattr(EventHubProducerClient, "from_connection_string", from_conn_str)
+    # Also patch get_client so __init__ doesn't try to call from_connection_string twice
+    conn_str = "Endpoint=sb://fake.servicebus.windows.net/;SharedAccessKeyName=key;SharedAccessKey=abc"
+    ehub = eventhub.Eventhub(
+        "namespace_url.example.net",
+        "name",
+        connection_string=conn_str,
+    )
+    assert ehub.connection_string == conn_str
+    assert ehub.credential is None
+
+
+def test_eventhub_neither_credential_nor_connection_string():
+    """Eventhub raises ValueError when neither credential nor connection_string is provided."""
+    with pytest.raises(ValueError, match="credential must be a DefaultAzureCredential"):
+        eventhub.Eventhub(
+            "namespace_url.example.net",
+            "name",
+        )
+
+
+async def test_managed_create_with_connection_string(mockehub):
+    """ManagedAzureEventhubProducer.create() works with connection_string (no credential_factory)."""
+    producer = eventhub.ManagedAzureEventhubProducer(
+        "namespace_url.example.net",
+        "name",
+        connection_string="Endpoint=sb://fake.servicebus.windows.net/;SharedAccessKeyName=key;SharedAccessKey=abc",
+    )
+    conn = await producer.create()
+    assert conn is not None
+    assert conn._client is mockehub
+
+
+async def test_close_with_no_credential(mockehub):
+    """Eventhub.close() does not raise when credential is None (connection_string path)."""
+    ehub = eventhub.Eventhub(
+        "namespace_url.example.net",
+        "name",
+        connection_string="Endpoint=sb://fake.servicebus.windows.net/;SharedAccessKeyName=key;SharedAccessKey=abc",
+    )
+    await ehub.close()  # should not raise
+    assert ehub._client is None
+
+
 async def test_managed_evhub_send_events_data_batch(mockehub_throwing, managed_ehub):
     batch = EventDataBatch()
     batch.add(EventData(body=b"test1"))

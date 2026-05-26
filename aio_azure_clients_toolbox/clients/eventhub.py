@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 class Eventhub:
     __slots__ = [
+        "connection_string",
         "credential",
         "evhub_name",
         "evhub_namespace",
@@ -35,12 +36,18 @@ class Eventhub:
         self,
         eventhub_namespace: str,
         eventhub_name: str,
-        credential: DefaultAzureCredential,
+        credential: DefaultAzureCredential | None = None,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
+        connection_string: str | None = None,
     ):
+        if not any([isinstance(connection_string, str), credential is not None]):
+            raise ValueError(
+                "credential must be a DefaultAzureCredential or connection_string must be a string"
+            )
         self.evhub_namespace = eventhub_namespace
         self.evhub_name = eventhub_name
         self.credential = credential
+        self.connection_string = connection_string
         self.transport_type = (
             {}
             if eventhub_transport_type == TRANSPORT_PURE_AMQP
@@ -52,6 +59,13 @@ class Eventhub:
         return getattr(self._client, name)
 
     def get_client(self) -> EventHubProducerClient:
+        if self.connection_string is not None:
+            return EventHubProducerClient.from_connection_string(
+                self.connection_string,
+                eventhub_name=self.evhub_name,
+                **cast(Any, self.transport_type),
+            )
+        assert self.credential is not None, "credential must be set when connection_string is not provided"
         return EventHubProducerClient(
             fully_qualified_namespace=self.evhub_namespace,
             eventhub_name=self.evhub_name,
@@ -69,10 +83,11 @@ class Eventhub:
         if self._client is not None:
             await self._client.close()
             self._client = None
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.exception(f"Eventhub credential close failed with {exc}")
+        if self.credential is not None:
+            try:
+                await self.credential.close()
+            except Exception as exc:
+                logger.exception(f"Eventhub credential close failed with {exc}")
 
     async def send_event_data(
         self,
@@ -195,7 +210,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         self,
         eventhub_namespace: str,
         eventhub_name: str,
-        credential_factory: CredentialFactory,
+        credential_factory: CredentialFactory | None = None,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
@@ -204,14 +219,16 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         max_lifespan_seconds: int | None = None,
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
+        connection_string: str | None = None,
         max_concurrent_creates: int | None = None,
     ):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
         self.eventhub_transport_type = eventhub_transport_type
-        if not callable(credential_factory):
+        self.connection_string = connection_string
+        if not any([isinstance(connection_string, str), callable(credential_factory)]):
             raise ValueError(
-                "credential_factory must be a callable returning a credential"
+                "credential_factory must be a callable returning a credential or connection_string must be a string"
             )
         self.credential_factory = credential_factory
         self.pool = connection_pooling.ConnectionPool(
@@ -236,8 +253,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         return cast(connection_pooling.AbstractConnection, Eventhub(
             self.eventhub_namespace,
             self.eventhub_name,
-            self.credential_factory(),
+            self.credential_factory() if self.credential_factory is not None else None,
             eventhub_transport_type=self.eventhub_transport_type,
+            connection_string=self.connection_string,
         ))
 
     async def close(self):
