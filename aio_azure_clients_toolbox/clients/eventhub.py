@@ -23,7 +23,29 @@ logger = logging.getLogger(__name__)
 
 
 class Eventhub:
+    """Low-level EventHub producer client without connection pooling.
+
+    For connection pooling see ``ManagedAzureEventhubProducer`` below.
+
+    Args:
+      eventhub_namespace:
+        Fully-qualified EventHub namespace hostname
+        (e.g. ``"myns.servicebus.windows.net"``).
+      eventhub_name:
+        EventHub name (the "topic").
+      credential:
+        An async ``DefaultAzureCredential`` instance.  Mutually exclusive with
+        ``connection_string``; exactly one must be supplied.
+      eventhub_transport_type:
+        Transport protocol.  Pass ``"amqp"`` (default) for pure AMQP or any
+        other value to use AMQP-over-WebSocket.
+      connection_string:
+        An Azure Event Hubs connection string.  Mutually exclusive with
+        ``credential``; exactly one must be supplied.
+    """
+
     __slots__ = [
+        "connection_string",
         "credential",
         "evhub_name",
         "evhub_namespace",
@@ -35,12 +57,18 @@ class Eventhub:
         self,
         eventhub_namespace: str,
         eventhub_name: str,
-        credential: DefaultAzureCredential,
+        credential: DefaultAzureCredential | None = None,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
+        connection_string: str | None = None,
     ):
+        if not any([isinstance(connection_string, str), credential is not None]):
+            raise ValueError(
+                "credential must be a DefaultAzureCredential or connection_string must be a string"
+            )
         self.evhub_namespace = eventhub_namespace
         self.evhub_name = eventhub_name
         self.credential = credential
+        self.connection_string = connection_string
         self.transport_type = (
             {}
             if eventhub_transport_type == TRANSPORT_PURE_AMQP
@@ -52,6 +80,13 @@ class Eventhub:
         return getattr(self._client, name)
 
     def get_client(self) -> EventHubProducerClient:
+        if self.connection_string is not None:
+            return EventHubProducerClient.from_connection_string(
+                self.connection_string,
+                eventhub_name=self.evhub_name,
+                **cast(Any, self.transport_type),
+            )
+        assert self.credential is not None, "credential must be set when connection_string is not provided"
         return EventHubProducerClient(
             fully_qualified_namespace=self.evhub_namespace,
             eventhub_name=self.evhub_name,
@@ -69,10 +104,11 @@ class Eventhub:
         if self._client is not None:
             await self._client.close()
             self._client = None
-        try:
-            await self.credential.close()
-        except Exception as exc:
-            logger.exception(f"Eventhub credential close failed with {exc}")
+        if self.credential is not None:
+            try:
+                await self.credential.close()
+            except Exception as exc:
+                logger.exception(f"Eventhub credential close failed with {exc}")
 
     async def send_event_data(
         self,
@@ -171,7 +207,8 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       eventhub_name:
         Eventhub name (the "topic").
       credential_factory:
-        A callable that returns an async DefaultAzureCredential which may be used to authenticate to the container.
+        A callable that returns an async ``DefaultAzureCredential``.  Mutually
+        exclusive with ``connection_string``; exactly one must be supplied.
       client_limit:
         Client limit per connection (default: 100).
       max_size:
@@ -189,13 +226,16 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         pool slots. Defaults to ``max(max_size // 3, 1)``.
       ready_message:
         A string, bytes, or EventData object representing the first "ready" message sent to establish connection.
+      connection_string:
+        An Azure Event Hubs connection string.  Mutually exclusive with
+        ``credential_factory``; exactly one must be supplied.
     """
 
     def __init__(
         self,
         eventhub_namespace: str,
         eventhub_name: str,
-        credential_factory: CredentialFactory,
+        credential_factory: CredentialFactory | None = None,
         eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
@@ -204,14 +244,16 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         max_lifespan_seconds: int | None = None,
         pool_connection_create_timeout: int = 10,
         pool_get_timeout: int = 60,
+        connection_string: str | None = None,
         max_concurrent_creates: int | None = None,
     ):
         self.eventhub_namespace = eventhub_namespace
         self.eventhub_name = eventhub_name
         self.eventhub_transport_type = eventhub_transport_type
-        if not callable(credential_factory):
+        self.connection_string = connection_string
+        if not any([isinstance(connection_string, str), callable(credential_factory)]):
             raise ValueError(
-                "credential_factory must be a callable returning a credential"
+                "credential_factory must be a callable returning a credential or connection_string must be a string"
             )
         self.credential_factory = credential_factory
         self.pool = connection_pooling.ConnectionPool(
@@ -236,8 +278,9 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         return cast(connection_pooling.AbstractConnection, Eventhub(
             self.eventhub_namespace,
             self.eventhub_name,
-            self.credential_factory(),
+            self.credential_factory() if self.credential_factory is not None else None,
             eventhub_transport_type=self.eventhub_transport_type,
+            connection_string=self.connection_string,
         ))
 
     async def close(self):
