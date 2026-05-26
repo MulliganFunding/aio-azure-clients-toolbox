@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 from aio_azure_clients_toolbox.clients import eventhub
 from azure.eventhub import EventData, EventDataBatch
+from azure.eventhub.aio import EventHubProducerClient
 from azure.eventhub.exceptions import AuthenticationError, ClientClosedError, ConnectError
 
 # Three calls to send a ready message
@@ -266,10 +267,6 @@ def test_managed_connection_string(mockehub):
 
 def test_eventhub_connection_string(monkeypatch):
     """Eventhub.get_client uses from_connection_string when connection_string is set."""
-    from unittest import mock
-
-    from azure.eventhub.aio import EventHubProducerClient
-
     fake_client = mock.MagicMock(spec=EventHubProducerClient)
     from_conn_str = mock.MagicMock(return_value=fake_client)
     monkeypatch.setattr(EventHubProducerClient, "from_connection_string", from_conn_str)
