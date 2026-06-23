@@ -1,5 +1,6 @@
 import logging
 import traceback
+import warnings
 from typing import Any, cast
 
 from azure.eventhub import EventData, EventDataBatch, TransportType
@@ -17,7 +18,6 @@ from aio_azure_clients_toolbox import connection_pooling
 
 from .types import CredentialFactory
 
-TRANSPORT_PURE_AMQP = "amqp"
 EVENTHUB_SEND_TTL_SECONDS = 220
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,7 @@ class Eventhub:
         An async ``DefaultAzureCredential`` instance.  Mutually exclusive with
         ``connection_string``; exactly one must be supplied.
       eventhub_transport_type:
-        Transport protocol.  Pass ``"amqp"`` (default) for pure AMQP or any
-        other value to use AMQP-over-WebSocket.
+        Transport protocol of type ``azure.eventhub.TransportType``.
       connection_string:
         An Azure Event Hubs connection string.  Mutually exclusive with
         ``credential``; exactly one must be supplied.
@@ -58,7 +57,7 @@ class Eventhub:
         eventhub_namespace: str,
         eventhub_name: str,
         credential: DefaultAzureCredential | None = None,
-        eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
+        eventhub_transport_type: TransportType | None = None,
         connection_string: str | None = None,
     ):
         if not any([isinstance(connection_string, str), credential is not None]):
@@ -69,11 +68,14 @@ class Eventhub:
         self.evhub_name = eventhub_name
         self.credential = credential
         self.connection_string = connection_string
-        self.transport_type = (
-            {}
-            if eventhub_transport_type == TRANSPORT_PURE_AMQP
-            else {"transport_type": TransportType.AmqpOverWebsocket}
-        )
+        if not isinstance(eventhub_transport_type, (TransportType, type(None))):
+            warnings.warn(
+                "eventhub_transport_type must be a TransportType or None; defaulting to None",
+                UserWarning,
+                stacklevel=2,
+            )
+            eventhub_transport_type = None
+        self.transport_type = eventhub_transport_type
         self._client: EventHubProducerClient | None = self.get_client()
 
     def __getattr__(self, name):
@@ -236,7 +238,7 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
         eventhub_namespace: str,
         eventhub_name: str,
         credential_factory: CredentialFactory | None = None,
-        eventhub_transport_type: str = TRANSPORT_PURE_AMQP,
+        eventhub_transport_type: TransportType | None = None,
         client_limit: int = connection_pooling.DEFAULT_SHARED_TRANSPORT_CLIENT_LIMIT,
         max_size: int = connection_pooling.DEFAULT_MAX_SIZE,
         max_idle_seconds: int = EVENTHUB_SEND_TTL_SECONDS,
