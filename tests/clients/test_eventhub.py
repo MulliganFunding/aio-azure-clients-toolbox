@@ -281,6 +281,17 @@ def test_eventhub_connection_string(monkeypatch):
     assert ehub.credential is None
 
 
+def test_bad_transport_type_warns_and_defaults_to_none(mockehub):
+    with pytest.warns(UserWarning, match="eventhub_transport_type must be a TransportType or None"):
+        hub = eventhub.Eventhub(
+            "namespace_url.example.net",
+            "name",
+            mock.AsyncMock(),
+            eventhub_transport_type="AmqpOverWebsocket",
+        )
+    assert hub.transport_type is None
+
+
 def test_eventhub_neither_credential_nor_connection_string():
     """Eventhub raises ValueError when neither credential nor connection_string is provided."""
     with pytest.raises(ValueError, match="credential must be a DefaultAzureCredential"):
