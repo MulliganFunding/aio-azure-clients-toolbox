@@ -52,6 +52,7 @@ class Eventhub:
         "evhub_name",
         "evhub_namespace",
         "_client",
+        "transport_type",
         "client_kwargs",
     ]
 
@@ -78,6 +79,7 @@ class Eventhub:
                 stacklevel=2,
             )
             eventhub_transport_type = None
+        self.transport_type: TransportType | None = eventhub_transport_type
         self.client_kwargs: dict[str, Any] = (
             {"transport_type": eventhub_transport_type} if eventhub_transport_type is not None else {}
         )

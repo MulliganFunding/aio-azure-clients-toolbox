@@ -2,7 +2,7 @@ from unittest import mock
 
 import pytest
 from aio_azure_clients_toolbox.clients import eventhub
-from azure.eventhub import EventData, EventDataBatch
+from azure.eventhub import EventData, EventDataBatch, TransportType
 from azure.eventhub.aio import EventHubProducerClient
 from azure.eventhub.exceptions import AuthenticationError, ClientClosedError, ConnectError
 
@@ -290,6 +290,28 @@ def test_bad_transport_type_warns_and_defaults_to_none(mockehub):
             eventhub_transport_type="AmqpOverWebsocket",
         )
     assert hub.client_kwargs == {}
+    assert hub.transport_type is None
+
+
+def test_explicit_none_transport_type_constructs_without_error(mockehub):
+    hub = eventhub.Eventhub(
+        "namespace_url.example.net",
+        "name",
+        mock.AsyncMock(),
+        eventhub_transport_type=None,
+    )
+    assert hub.client_kwargs == {}
+
+
+def test_valid_transport_type_sets_client_kwargs(mockehub):
+    hub = eventhub.Eventhub(
+        "namespace_url.example.net",
+        "name",
+        mock.AsyncMock(),
+        eventhub_transport_type=TransportType.AmqpOverWebsocket,
+    )
+    assert hub.transport_type is TransportType.AmqpOverWebsocket
+    assert hub.client_kwargs == {"transport_type": TransportType.AmqpOverWebsocket}
 
 
 def test_eventhub_neither_credential_nor_connection_string():
