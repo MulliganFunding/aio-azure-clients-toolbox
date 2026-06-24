@@ -289,7 +289,7 @@ def test_bad_transport_type_warns_and_defaults_to_none(mockehub):
             mock.AsyncMock(),
             eventhub_transport_type="AmqpOverWebsocket",
         )
-    assert hub.transport_type is None
+    assert hub.client_kwargs == {}
 
 
 def test_eventhub_neither_credential_nor_connection_string():

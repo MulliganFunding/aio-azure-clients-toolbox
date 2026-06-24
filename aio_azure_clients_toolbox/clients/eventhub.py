@@ -37,7 +37,10 @@ class Eventhub:
         An async ``DefaultAzureCredential`` instance.  Mutually exclusive with
         ``connection_string``; exactly one must be supplied.
       eventhub_transport_type:
-        Transport protocol of type ``azure.eventhub.TransportType``.
+        Transport protocol.  Must be an ``azure.eventhub.TransportType`` instance
+        or ``None`` (default).  ``None`` omits the argument entirely, letting the
+        SDK choose its default (AMQP).  Any non-``TransportType`` value emits a
+        ``UserWarning`` and is treated as ``None``.
       connection_string:
         An Azure Event Hubs connection string.  Mutually exclusive with
         ``credential``; exactly one must be supplied.
@@ -49,7 +52,7 @@ class Eventhub:
         "evhub_name",
         "evhub_namespace",
         "_client",
-        "transport_type",
+        "client_kwargs",
     ]
 
     def __init__(
@@ -75,7 +78,9 @@ class Eventhub:
                 stacklevel=2,
             )
             eventhub_transport_type = None
-        self.transport_type = eventhub_transport_type
+        self.client_kwargs: dict[str, Any] = (
+            {"transport_type": eventhub_transport_type} if eventhub_transport_type is not None else {}
+        )
         self._client: EventHubProducerClient | None = self.get_client()
 
     def __getattr__(self, name):
@@ -86,14 +91,14 @@ class Eventhub:
             return EventHubProducerClient.from_connection_string(
                 self.connection_string,
                 eventhub_name=self.evhub_name,
-                **cast(Any, self.transport_type),
+                **self.client_kwargs,
             )
         assert self.credential is not None, "credential must be set when connection_string is not provided"
         return EventHubProducerClient(
             fully_qualified_namespace=self.evhub_namespace,
             eventhub_name=self.evhub_name,
             credential=self.credential,
-            **cast(Any, self.transport_type),
+            **self.client_kwargs,
         )
 
     @property
@@ -211,6 +216,11 @@ class ManagedAzureEventhubProducer(connection_pooling.AbstractorConnector):
       credential_factory:
         A callable that returns an async ``DefaultAzureCredential``.  Mutually
         exclusive with ``connection_string``; exactly one must be supplied.
+      eventhub_transport_type:
+        Transport protocol.  Must be an ``azure.eventhub.TransportType`` instance
+        or ``None`` (default).  ``None`` omits the argument, letting the SDK
+        choose its default (AMQP).  Passed through to each pooled ``Eventhub``
+        connection.
       client_limit:
         Client limit per connection (default: 100).
       max_size:
