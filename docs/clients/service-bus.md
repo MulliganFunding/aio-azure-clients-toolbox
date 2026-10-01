@@ -25,7 +25,9 @@ ManagedAzureServiceBusSender(
     max_idle_seconds: int = 300,
     max_lifespan_seconds: int = None,
     pool_connection_create_timeout: int = 10,
-    pool_get_timeout: int = 60
+    pool_get_timeout: int = 60,
+    send_timeout_seconds: float = 10,
+    send_attempts: int = 1,
 )
 ```
 
@@ -40,6 +42,8 @@ ManagedAzureServiceBusSender(
 - **max_lifespan_seconds**: Maximum connection lifetime
 - **pool_connection_create_timeout**: Timeout for creating connections in the pool (default: 10 seconds)
 - **pool_get_timeout**: Timeout for acquiring connections from the pool (default: 60 seconds)
+- **send_timeout_seconds**: Timeout for each `schedule_messages` call, including the Azure SDK's internal retries (default: 10 seconds). A timeout does not close or expire the connection, which may be shared with other in-flight sends.
+- **send_attempts**: Attempts `send_message` makes when a send times out, each acquiring a connection from the pool as usual (default: 1). A timed-out send may still have enqueued the message, so use values above 1 only with duplicate detection enabled on the queue and a stable `unique_msg_id`.
 
 ### Methods
 
@@ -51,8 +55,10 @@ async def send_message(
     delay: int = 0,
     unique_msg_id: str | None = None,
     **msg_kwargs,
-) -> None
+) -> list[int]
 ```
+
+Returns the sequence numbers of the scheduled messages.
 
 Send message to queue with optional delay.
 

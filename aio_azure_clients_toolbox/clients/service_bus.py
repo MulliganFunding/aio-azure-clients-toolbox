@@ -15,6 +15,7 @@ from azure.identity.aio import DefaultAzureCredential
 from azure.servicebus import ServiceBusMessage, ServiceBusReceiveMode
 from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver, ServiceBusSender
 from azure.servicebus.exceptions import (
+    OperationTimeoutError,
     ServiceBusAuthenticationError,
     ServiceBusAuthorizationError,
     ServiceBusCommunicationError,
@@ -28,6 +29,10 @@ from .types import CredentialFactory
 
 # Actual time limit: 240s
 SERVICE_BUS_SEND_TTL_SECONDS = 200
+# Without a timeout, `schedule_messages` waits indefinitely for the broker's
+# management response. We have observed responses arriving ~33s late on a
+# connection where the message itself was already enqueued.
+SERVICE_BUS_SEND_TIMEOUT_SECONDS = 10
 logger = logging.getLogger(__name__)
 
 
@@ -200,6 +205,14 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
       connection_string:
         An Azure Service Bus connection string.  Mutually exclusive with
         ``credential_factory``; exactly one must be supplied.
+      send_timeout_seconds:
+        Timeout for each `schedule_messages` call, including the Azure SDK's
+        internal retries (default: 10 seconds).
+      send_attempts:
+        Number of attempts `send_message` makes when `schedule_messages` times out,
+        each acquiring a connection from the pool as usual (default: 1). A timed-out attempt may
+        still have enqueued the message, so values above 1 should only be used with
+        queues that have duplicate detection enabled and a stable ``unique_msg_id``.
     """
 
     def __init__(
@@ -216,7 +229,15 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         pool_get_timeout: int = 60,
         connection_string: str | None = None,
         max_concurrent_creates: int | None = None,
+        send_timeout_seconds: float = SERVICE_BUS_SEND_TIMEOUT_SECONDS,
+        send_attempts: int = 1,
     ):
+        if send_timeout_seconds <= 0:
+            raise ValueError("send_timeout_seconds must be greater than 0")
+        if send_attempts < 1:
+            raise ValueError("send_attempts must be a positive integer")
+        self.send_timeout_seconds = send_timeout_seconds
+        self.send_attempts = send_attempts
         self.service_bus_namespace_url = service_bus_namespace_url
         self.service_bus_queue_name = service_bus_queue_name
         self.connection_string = connection_string
@@ -284,7 +305,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         attempts = 2
         while attempts > 0:
             try:
-                await conn.schedule_messages(message, now)
+                await conn.schedule_messages(message, now, timeout=self.send_timeout_seconds)
                 return True
             except (ServiceBusAuthorizationError, ServiceBusAuthenticationError):
                 # We do not believe these will improve with repeated tries
@@ -303,8 +324,16 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         return False
 
     @connection_pooling.send_time_deco(logger, "ServiceBus.send_message")
-    async def send_message(self, msg: str, delay: int = 0, unique_msg_id: str | None = None, **msg_kwargs):
+    async def send_message(
+        self, msg: str, delay: int = 0, unique_msg_id: str | None = None, **msg_kwargs
+    ) -> list[int]:
         """Schedule a message for delivery using a pooled sender connection.
+
+        Each attempt is limited to `send_timeout_seconds`. A timed-out attempt
+        is retried (up to `send_attempts`) with a connection from `pool.get`.
+
+        Returns:
+            The sequence numbers of the scheduled messages.
 
         Args:
             msg:
@@ -323,19 +352,29 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         message = ServiceBusMessage(msg, message_id=unique_msg_id, **msg_kwargs)
         now = datetime.datetime.now(tz=datetime.UTC)
         scheduled_time_utc = now + datetime.timedelta(seconds=delay)
-        async with self.pool.get(**self.pool_kwargs) as conn:
-            try:
-                await cast(SendClientCloseWrapper, conn).schedule_messages(
-                    message, scheduled_time_utc
-                )
-            except (
-                ServiceBusCommunicationError,
-                ServiceBusAuthorizationError,
-                ServiceBusAuthenticationError,
-                ServiceBusConnectionError,
-            ):
-                logger.exception(
-                    f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
-                )
-                await self.pool.expire_conn(conn)
-                raise
+        for attempt in range(1, self.send_attempts + 1):
+            async with self.pool.get(**self.pool_kwargs) as conn:
+                try:
+                    return await cast(SendClientCloseWrapper, conn).schedule_messages(
+                        message, scheduled_time_utc, timeout=self.send_timeout_seconds
+                    )
+                except OperationTimeoutError:
+                    logger.warning(
+                        f"ServiceBus.send_message timed out after {self.send_timeout_seconds}s "
+                        f"(attempt {attempt} of {self.send_attempts})."
+                    )
+                    if attempt == self.send_attempts:
+                        raise
+                except (
+                    ServiceBusCommunicationError,
+                    ServiceBusAuthorizationError,
+                    ServiceBusAuthenticationError,
+                    ServiceBusConnectionError,
+                ):
+                    logger.exception(
+                        f"ServiceBus.send_message failed. Expiring connection: {traceback.format_exc()}"
+                    )
+                    await self.pool.expire_conn(conn)
+                    raise
+        # Every attempt either returns or raises; this satisfies the type checker.
+        raise AssertionError("unreachable")  # pragma: no cover
