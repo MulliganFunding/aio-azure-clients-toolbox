@@ -1,6 +1,6 @@
 [project]
 name = "aio-azure-clients-toolbox"
-version = "1.4.5"
+version = "1.5.0"
 description = "Async Azure Clients Mulligan Python projects"
 authors = [{ "name" = "Erik Aker", "email" = "eaker@mulliganfunding.com" }]
 license = { file = "LICENSE" }
@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "aiofiles",
     "aiohttp",
-    "anyio>=4.14.2",
+    "anyio>=4.15.1",
     "azure-core-tracing-opentelemetry",
     "azure-cosmos",
     "azure-eventgrid",
