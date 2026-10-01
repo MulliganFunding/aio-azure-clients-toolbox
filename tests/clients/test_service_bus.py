@@ -1,3 +1,4 @@
+import asyncio
 from unittest import mock
 
 import pytest
@@ -143,16 +144,17 @@ async def test_managed_send_message_returns_sequence_numbers_and_passes_timeout(
     assert send_call.kwargs["timeout"] == service_bus.SERVICE_BUS_SEND_TIMEOUT_SECONDS
 
 
-async def test_managed_send_message_timeout_expires_connection(managed_sbus, mockservicebus):
+async def test_managed_send_message_timeout_does_not_close_connection(managed_sbus, mockservicebus):
     mockservicebus._sender.schedule_messages.side_effect = [None, OperationTimeoutError()]
     with pytest.raises(OperationTimeoutError):
         await managed_sbus.send_message("hey")
 
-    assert managed_sbus.pool.ready_connection_count == 0
+    mockservicebus._sender.close.assert_not_awaited()
+    assert managed_sbus.pool.ready_connection_count == 1
     assert mockservicebus._sender.schedule_messages.call_count == 2
 
 
-async def test_managed_send_message_timeout_retries_on_new_connection(mockservicebus):
+async def test_managed_send_message_timeout_retries_through_pool(mockservicebus):
     sbus = service_bus.ManagedAzureServiceBusSender(
         "https://sbus.example.com",
         "fake-queue-name",
@@ -160,21 +162,20 @@ async def test_managed_send_message_timeout_retries_on_new_connection(mockservic
         send_timeout_seconds=5,
         send_attempts=2,
     )
-    # ready, timed-out send, ready for the replacement connection, successful send
+    # ready, timed-out send, successful send
     mockservicebus._sender.schedule_messages.side_effect = [
         None,
         OperationTimeoutError(),
-        None,
         [7],
     ]
     assert await sbus.send_message("hey", unique_msg_id="task-1") == [7]
 
     calls = mockservicebus._sender.schedule_messages.call_args_list
-    assert len(calls) == 4
-    assert calls[1].args[0] is calls[3].args[0]
-    assert calls[3].args[0].message_id == "task-1"
+    assert len(calls) == 3
+    assert calls[1].args[0] is calls[2].args[0]
+    assert calls[2].args[0].message_id == "task-1"
     assert all(call.kwargs["timeout"] == 5 for call in calls)
-    assert sbus.pool.ready_connection_count == 1
+    mockservicebus._sender.close.assert_not_awaited()
 
 
 async def test_managed_send_message_timeout_exhausts_attempts(mockservicebus):
@@ -187,14 +188,53 @@ async def test_managed_send_message_timeout_exhausts_attempts(mockservicebus):
     mockservicebus._sender.schedule_messages.side_effect = [
         None,
         OperationTimeoutError(),
-        None,
         OperationTimeoutError(),
     ]
     with pytest.raises(OperationTimeoutError):
         await sbus.send_message("hey")
 
-    assert mockservicebus._sender.schedule_messages.call_count == 4
-    assert sbus.pool.ready_connection_count == 0
+    assert mockservicebus._sender.schedule_messages.call_count == 3
+    mockservicebus._sender.close.assert_not_awaited()
+
+
+async def test_managed_send_message_timeout_does_not_interrupt_concurrent_send(mockservicebus):
+    """One send times out while another is in flight on the same connection."""
+    # A single pool slot forces both sends onto the same connection
+    sbus = service_bus.ManagedAzureServiceBusSender(
+        "https://sbus.example.com",
+        "fake-queue-name",
+        lambda: mock.AsyncMock(),
+        max_size=1,
+    )
+    release_timed_out = asyncio.Event()
+    release_concurrent = asyncio.Event()
+
+    async def schedule_messages(message, *args, **kwargs):
+        body = str(message)
+        if body == "times-out":
+            await release_timed_out.wait()
+            raise OperationTimeoutError()
+        if body == "concurrent":
+            await release_concurrent.wait()
+            return [9]
+        return None  # readiness check
+
+    mockservicebus._sender.schedule_messages.side_effect = schedule_messages
+
+    timed_out = asyncio.create_task(sbus.send_message("times-out"))
+    concurrent = asyncio.create_task(sbus.send_message("concurrent"))
+    # readiness check + both sends
+    while mockservicebus._sender.schedule_messages.call_count < 3:
+        await asyncio.sleep(0)
+    assert sbus.pool._pool[0].current_client_count == 2
+
+    release_timed_out.set()
+    with pytest.raises(OperationTimeoutError):
+        await timed_out
+
+    release_concurrent.set()
+    assert await concurrent == [9]
+    mockservicebus._sender.close.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

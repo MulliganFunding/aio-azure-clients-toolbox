@@ -207,11 +207,10 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         ``credential_factory``; exactly one must be supplied.
       send_timeout_seconds:
         Timeout for each `schedule_messages` call, including the Azure SDK's
-        internal retries (default: 10 seconds). On timeout the connection is
-        expired from the pool.
+        internal retries (default: 10 seconds).
       send_attempts:
         Number of attempts `send_message` makes when `schedule_messages` times out,
-        each on a different pooled connection (default: 1). A timed-out attempt may
+        each acquiring a connection from the pool as usual (default: 1). A timed-out attempt may
         still have enqueued the message, so values above 1 should only be used with
         queues that have duplicate detection enabled and a stable ``unique_msg_id``.
     """
@@ -331,8 +330,7 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
         """Schedule a message for delivery using a pooled sender connection.
 
         Each attempt is limited to `send_timeout_seconds`. A timed-out attempt
-        expires its connection, and the next attempt (up to `send_attempts`)
-        uses a different one.
+        is retried (up to `send_attempts`) with a connection from `pool.get`.
 
         Returns:
             The sequence numbers of the scheduled messages.
@@ -363,9 +361,8 @@ class ManagedAzureServiceBusSender(connection_pooling.AbstractorConnector):
                 except OperationTimeoutError:
                     logger.warning(
                         f"ServiceBus.send_message timed out after {self.send_timeout_seconds}s "
-                        f"(attempt {attempt} of {self.send_attempts}). Expiring connection."
+                        f"(attempt {attempt} of {self.send_attempts})."
                     )
-                    await self.pool.expire_conn(conn)
                     if attempt == self.send_attempts:
                         raise
                 except (
